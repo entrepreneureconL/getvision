@@ -1,0 +1,56 @@
+# .easignore — controla qué se sube al server de EAS.
+# Si este archivo existe, EAS lo usa en vez de .gitignore.
+#
+# IMPORTANTE: incluimos .env porque las claves EXPO_PUBLIC_* tienen que
+# llegar al bundle. (.env sigue estando en .gitignore para que no vaya a git.)
+#
+# Mantener sincronizado con .gitignore EXCEPTO la línea de .env.
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files (los .local sí los ignoramos)
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders (EAS las regenera)
+/ios
+/android
+
+# EAS Build artifacts (no subir APKs anteriores)
+*.apk
+*.aab
+credentials.json
+
+# Documentación / archivos de proyecto que no necesitamos en el bundle
+GETVISION_MASTER.md
+*.md

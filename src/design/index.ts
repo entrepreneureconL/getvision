@@ -1,0 +1,29 @@
+/**
+ * Design System — barrel export.
+ *
+ * Punto único de entrada para tokens y primitivos. Usá imports cortos:
+ *   import { color, space, Heading, Card, Button, Stack } from '../design';
+ *
+ * NO importar piezas individuales desde sus archivos a menos que necesites
+ * el `default export` del archivo (caso raro).
+ *
+ * Status F1-D: tokens + 9 primitivos base.
+ *   Texto/Layout:  Heading, Text, Stack, Divider
+ *   Superficies:   Card
+ *   Acción:        Button
+ *   Forms:         Input
+ *   Estado/Filtro: SegmentedControl, Chip
+ */
+
+export { color, space, radius, text, shadow, tokens } from './tokens';
+export type { SpaceKey, RadiusKey, SizeKey, WeightKey } from './tokens';
+
+export { default as Heading } from './components/Heading';
+export { default as Text } from './components/Text';
+export { default as Stack } from './components/Stack';
+export { default as Divider } from './components/Divider';
+export { default as Card } from './components/Card';
+export { default as Button } from './components/Button';
+export { default as Input } from './components/Input';
+export { default as SegmentedControl } from './components/SegmentedControl';
+export { default as Chip } from './components/Chip';
