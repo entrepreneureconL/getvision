@@ -289,8 +289,27 @@ export const accountsRepo = {
         onConflict: 'business_id,name,kind',
         ignoreDuplicates: true,
       });
-    if (error) {
-      console.error('[repo:accounts] ensureDefaultsForBusiness error:', error);
+    if (!error) return;
+
+    // 42P10 = "no unique constraint matching ON CONFLICT" — la migration
+    // F1-Mfix_accounts_dedup.sql no está aplicada en esta DB. Sin este
+    // fallback, el business nuevo queda con 0 cuentas y el botón Guardar
+    // de SaleForm/CostForm se deshabilita en silencio (bug 2026-06-10).
+    // Degradamos a insert plano: el check de length===0 de arriba ya corrió,
+    // así que en el peor caso (race entre dos callers) duplicamos — el mismo
+    // riesgo pre-fix, preferible a bloquear la carga de datos por completo.
+    if (error.code === '42P10') {
+      console.warn(
+        '[repo:accounts] UNIQUE constraint ausente (¿migration F1-Mfix sin aplicar?). ' +
+        'Fallback a insert plano.',
+      );
+      const { error: insertError } = await supabase.from('accounts').insert(rows);
+      if (insertError) {
+        console.error('[repo:accounts] ensureDefaultsForBusiness fallback error:', insertError);
+      }
+      return;
     }
+
+    console.error('[repo:accounts] ensureDefaultsForBusiness error:', error);
   },
 };

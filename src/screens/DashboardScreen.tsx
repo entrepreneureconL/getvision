@@ -309,11 +309,11 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
 
   const subInfoText = heroMetric ? buildSubInfo(heroMetric.meta) : '';
 
-  // F1-K.2: heurística "usuario ya experimentado" → picker compacto.
-  // Threshold low (5) porque listRecent trae hasta 10 — si tenemos al menos
-  // 5 ítems devueltos sabemos seguro que hay ≥5 transactions guardadas.
-  // Antes de eso mantenemos los items grandes con subtítulo pedagógico.
-  const isExperienced = recentTransactions.length >= 5;
+  // F1-K.2 revertido (decisión CEO 2026-06-10): el picker del FAB es genérico
+  // para todos los usuarios — siempre modo simple (items grandes con subtítulo
+  // pedagógico). La adaptación por experiencia queda para el panel, no para el
+  // botón. Si en F2 se valida que algún usuario prefiere el modo compacto,
+  // volver como toggle en Settings (ver TECH §9.14).
 
   // ───── Sección modo detailed (legacy F0 — pendiente refactor) ─────
 
@@ -563,76 +563,43 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
           <View style={styles.handle} />
           <RNText style={styles.pickerTitle}>¿Qué querés registrar?</RNText>
 
-          {isExperienced ? (
-            // F1-K.2: modo compacto (chips 3-en-fila) para usuario con ≥5 tx.
-            <View style={styles.compactRow}>
-              <TouchableOpacity
-                style={[styles.compactItem, { borderColor: '#1A6B3A' }]}
-                onPress={() => { setShowMoreOptions(false); setActiveModal('sales'); }}
-                activeOpacity={0.75}
-              >
-                <RNText style={styles.compactIcon}>💰</RNText>
-                <RNText style={styles.compactLabel}>Cobrar</RNText>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.compactItem, { borderColor: '#B85C00' }]}
-                onPress={() => { setShowMoreOptions(false); setActiveModal('costs'); }}
-                activeOpacity={0.75}
-              >
-                <RNText style={styles.compactIcon}>🛒</RNText>
-                <RNText style={styles.compactLabel}>Pagar</RNText>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.compactItem, { borderColor: '#2E86C1' }]}
-                onPress={() => { setShowMoreOptions(false); setActiveModal('hours'); }}
-                activeOpacity={0.75}
-              >
-                <RNText style={styles.compactIcon}>⏱</RNText>
-                <RNText style={styles.compactLabel}>Horas</RNText>
-              </TouchableOpacity>
+          {/* Modo simple genérico para todos (items grandes con subtítulo
+              pedagógico). F1-K.2 compacto revertido — decisión CEO 2026-06-10. */}
+          <TouchableOpacity
+            style={[styles.pickerItem, { borderLeftColor: '#27AE60' }]}
+            onPress={() => { setShowMoreOptions(false); setActiveModal('sales'); }}
+            activeOpacity={0.75}
+          >
+            <RNText style={styles.pickerIcon}>💰</RNText>
+            <View style={styles.pickerTextWrap}>
+              <RNText style={styles.pickerItemTitle}>Cobrar</RNText>
+              <RNText style={styles.pickerItemSub}>Lo que entró a tu negocio</RNText>
             </View>
-          ) : (
-            // F0/F1-D: modo grande con subtítulo pedagógico para onboarding.
-            <>
-              <TouchableOpacity
-                style={[styles.pickerItem, { borderLeftColor: '#27AE60' }]}
-                onPress={() => { setShowMoreOptions(false); setActiveModal('sales'); }}
-                activeOpacity={0.75}
-              >
-                <RNText style={styles.pickerIcon}>💰</RNText>
-                <View style={styles.pickerTextWrap}>
-                  <RNText style={styles.pickerItemTitle}>Cobrar</RNText>
-                  <RNText style={styles.pickerItemSub}>Lo que entró a tu negocio</RNText>
-                </View>
-              </TouchableOpacity>
+          </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.pickerItem, { borderLeftColor: '#E67E22' }]}
-                onPress={() => { setShowMoreOptions(false); setActiveModal('costs'); }}
-                activeOpacity={0.75}
-              >
-                <RNText style={styles.pickerIcon}>🛒</RNText>
-                <View style={styles.pickerTextWrap}>
-                  <RNText style={styles.pickerItemTitle}>Pagar</RNText>
-                  <RNText style={styles.pickerItemSub}>Lo que gastaste</RNText>
-                </View>
-              </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.pickerItem, { borderLeftColor: '#E67E22' }]}
+            onPress={() => { setShowMoreOptions(false); setActiveModal('costs'); }}
+            activeOpacity={0.75}
+          >
+            <RNText style={styles.pickerIcon}>🛒</RNText>
+            <View style={styles.pickerTextWrap}>
+              <RNText style={styles.pickerItemTitle}>Pagar</RNText>
+              <RNText style={styles.pickerItemSub}>Lo que gastaste</RNText>
+            </View>
+          </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.pickerItem, { borderLeftColor: '#2E86C1' }]}
-                onPress={() => { setShowMoreOptions(false); setActiveModal('hours'); }}
-                activeOpacity={0.75}
-              >
-                <RNText style={styles.pickerIcon}>⏱</RNText>
-                <View style={styles.pickerTextWrap}>
-                  <RNText style={styles.pickerItemTitle}>Horas trabajadas</RNText>
-                  <RNText style={styles.pickerItemSub}>El tiempo que le dedicaste</RNText>
-                </View>
-              </TouchableOpacity>
-            </>
-          )}
+          <TouchableOpacity
+            style={[styles.pickerItem, { borderLeftColor: '#2E86C1' }]}
+            onPress={() => { setShowMoreOptions(false); setActiveModal('hours'); }}
+            activeOpacity={0.75}
+          >
+            <RNText style={styles.pickerIcon}>⏱</RNText>
+            <View style={styles.pickerTextWrap}>
+              <RNText style={styles.pickerItemTitle}>Horas trabajadas</RNText>
+              <RNText style={styles.pickerItemSub}>El tiempo que le dedicaste</RNText>
+            </View>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.moreToggle}
@@ -852,19 +819,6 @@ const styles = StyleSheet.create({
   pickerItemTitle:   { color: '#FFF', fontSize: 14, fontWeight: '600' },
   pickerItemSub:     { color: '#7F8C8D', fontSize: 11, marginTop: 2 },
 
-  /* F1-K.2: variantes compactas para usuario experimentado (≥5 tx). */
-  compactRow:        { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  compactItem: {
-    flex: 1,
-    backgroundColor: '#141422',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  compactIcon:       { fontSize: 26, marginBottom: 4 },
-  compactLabel:      { color: '#FFF', fontSize: 13, fontWeight: '600' },
   moreToggle:        { paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   moreToggleText:    { color: token.accent.base, fontSize: 12, fontWeight: '500' },
   pickerCancel:      { paddingVertical: 14, alignItems: 'center', marginTop: 8, borderRadius: 12, borderWidth: 1, borderColor: '#2A2A4A' },
