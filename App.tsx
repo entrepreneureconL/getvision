@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, Text, TouchableOpacity } from 'react-native';
 import { supabase } from './src/lib/supabase';
 import { businessesRepo } from './src/repos/businesses';
+import { eventsRepo } from './src/repos/events';
 import type { Business } from './src/schemas/business';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import ConfirmProvider from './src/components/ConfirmProvider';
@@ -35,7 +36,11 @@ export default function App() {
       // ya tenemos la sesión establecida. El strip manual del hash con
       // access_token (flujo implicit viejo) ya no es necesario.
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) await resolveScreen(session.user.id);
+      if (session) {
+        const biz = await resolveScreen(session.user.id);
+        // F1-N: cada boot con sesión cuenta como sesión (base del D7).
+        if (biz) eventsRepo.track(biz.id, 'session_start');
+      }
     } catch (e) {
       console.error('[App] checkSession error:', e);
     } finally {
@@ -47,8 +52,13 @@ export default function App() {
    * Resuelve a qué pantalla mandar al usuario según el estado del negocio.
    * Antes hablaba directo con supabase. Ahora usa businessesRepo (validación
    * zod + manejo de errores + maybeSingle internos).
+   *
+   * F1-N: devuelve el Business para que los callers de "inicio de sesión"
+   * (checkSession, handleLoginSuccess) puedan trackear session_start. No se
+   * trackea acá adentro porque handleSettingsSaved también llama resolveScreen
+   * y un save de Settings no es una sesión nueva.
    */
-  const resolveScreen = async (userId: string) => {
+  const resolveScreen = async (userId: string): Promise<Business | null> => {
     const biz = await businessesRepo.ensureForUser(userId);
     if (biz) {
       setBusinessId(biz.id);
@@ -59,16 +69,24 @@ export default function App() {
       console.warn('[App] resolveScreen: no se pudo obtener/crear business');
       setCurrentScreen('welcome');
     }
+    return biz;
   };
 
   const handleLoginSuccess = async () => {
     setShowConfirmed(true);
     setTimeout(() => setShowConfirmed(false), 3000);
     const { data: { user } } = await supabase.auth.getUser();
-    if (user) await resolveScreen(user.id);
+    if (user) {
+      const biz = await resolveScreen(user.id);
+      if (biz) eventsRepo.track(biz.id, 'session_start');
+    }
   };
 
-  const handleOnboardingComplete = () => setCurrentScreen('dashboard');
+  const handleOnboardingComplete = () => {
+    // F1-N: timestamp para medir duración del onboarding (target F1-H < 2 min).
+    if (businessId) eventsRepo.track(businessId, 'onboarding_completed');
+    setCurrentScreen('dashboard');
+  };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();

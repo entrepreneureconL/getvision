@@ -14,6 +14,7 @@ import { todayLocalISO } from '../utils/periods';
 import { transactionsRepo } from '../repos/transactions';
 import { accountsRepo } from '../repos/accounts';
 import { categoriesRepo } from '../repos/categories';
+import { eventsRepo } from '../repos/events';
 import AddCategoryModal from './AddCategoryModal';
 import type { Transaction } from '../schemas/transaction';
 import type { Account } from '../schemas/account';
@@ -155,6 +156,10 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction, 
             to_account_id: toAccountId,
           });
         if (insertError) throw insertError;
+        // F1-N: solo creaciones (no edits). Sin monto en props — no PII.
+        eventsRepo.track(businessId, 'transaction_created', {
+          type: 'income', category, settled: isSettled,
+        });
       }
       onSuccess();
     } catch (err: any) {

@@ -28,6 +28,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { transactionsRepo } from '../repos/transactions';
 import { accountsRepo } from '../repos/accounts';
+import { eventsRepo } from '../repos/events';
 import { resolveCategory } from '../utils/transactionCategories';
 import { todayLocalISO } from '../utils/periods';
 import type { Account } from '../schemas/account';
@@ -136,6 +137,9 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
         to_account_id: singleAccountId,
       });
       if (err) throw err;
+      eventsRepo.track(businessId, 'transaction_created', {
+        type: 'income_extraordinary', category: 'owner_in', settled: true,
+      });
       resetForm();
       onSuccess();
     } catch (err: any) {
@@ -163,6 +167,9 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
         from_account_id: singleAccountId,
       });
       if (err) throw err;
+      eventsRepo.track(businessId, 'transaction_created', {
+        type: 'expense_extraordinary', category: 'owner_out', settled: true,
+      });
       resetForm();
       onSuccess();
     } catch (err: any) {
@@ -197,6 +204,9 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
         to_account_id: toAccountId,
       });
       if (err) throw err;
+      eventsRepo.track(businessId, 'transaction_created', {
+        type: 'income_extraordinary', category: 'transfer', settled: true,
+      });
       resetForm();
       onSuccess();
     } catch (err: any) {
@@ -612,7 +622,12 @@ function PendingRow({
       transaction.id, transaction.type, selectedAccountId, today,
     );
     setSettling(false);
-    if (ok) onSettled();
+    if (ok) {
+      eventsRepo.track(transaction.business_id, 'transaction_settled', {
+        type: transaction.type,
+      });
+      onSettled();
+    }
   };
 
   return (
