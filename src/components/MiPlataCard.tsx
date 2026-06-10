@@ -26,20 +26,23 @@
  * Props de extensión:
  *   - onPendingPress  → atajo a MovementForm tab Pendientes. Heredado de F1-K.3.
  *   - onChannelPress  → F1-M.4: tap en línea de cuenta → historial filtrado.
- *   - onStockPeriodChange → cambio del chip Hoy/Semana/Mes/Año.
+ *
+ * G-1 (GETVISION_DESIGN, 2026-06-10): el SegmentedControl interno se eliminó.
+ * El período ahora lo gobierna el selector ÚNICO del Dashboard — dos relojes
+ * en la misma pantalla eran fricción cognitiva directa. "Año" migra a la
+ * futura tab Stats (no existe en el selector unificado Hoy/Semana/Mes).
  */
 
 import { useState } from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import type { AccountVariation, MiPlataSnapshot } from '../repos/analytics';
 import type { StockPeriod } from '../utils/periods';
-import { formatMoney } from './Money';
+import { formatMoney, splitMoneyParts } from './Money';
 import {
   Text,
   Stack,
   Card,
   Divider,
-  SegmentedControl,
   color,
   space,
   text as tokenText,
@@ -52,16 +55,7 @@ type Props = {
   onPendingPress?: () => void;
   /** F1-M.4 — tap en línea de cuenta → historial filtrado por cuenta. */
   onChannelPress?: (account: AccountVariation) => void;
-  /** F1-M Fase B — cambio de período del selector temporal. */
-  onStockPeriodChange: (sp: StockPeriod) => void;
 };
-
-const STOCK_PERIOD_OPTIONS: { value: StockPeriod; label: string }[] = [
-  { value: 'today', label: 'Hoy' },
-  { value: 'week',  label: 'Semana' },
-  { value: 'month', label: 'Mes' },
-  { value: 'year',  label: 'Año' },
-];
 
 const PERIOD_NOUN: Record<StockPeriod, string> = {
   today: 'hoy',
@@ -74,7 +68,6 @@ export default function MiPlataCard({
   snapshot,
   onPendingPress,
   onChannelPress,
-  onStockPeriodChange,
 }: Props) {
   const {
     variation,
@@ -145,13 +138,6 @@ export default function MiPlataCard({
   // Para 'today' con delta=0 (sin movimientos hoy ni ayer) ocultamos la línea.
   const showDelta = delta.amount !== 0;
 
-  // Sign helper — para mostrar "+ $ 307.900" / "− $ 77.000" / "$ 0".
-  const signedAmount = (amount: number): string => {
-    if (amount > 0) return `+ $ ${formatMoney(amount)}`;
-    if (amount < 0) return `− $ ${formatMoney(amount)}`;
-    return `$ ${formatMoney(0)}`;
-  };
-
   return (
     <Card variant="surface" padding="lg" onPress={cardOnPress}>
       {/* ── Encabezado con chevron de expand ── */}
@@ -172,19 +158,22 @@ export default function MiPlataCard({
         ) : null}
       </Stack>
 
-      {/* ── Selector temporal Hoy/Semana/Mes/Año ── */}
+      {/* ── Variación neta del período (hero number) ──
+          G-6: decimales atenuados — el ojo va a los enteros. */}
       <View style={{ marginTop: space['3'] }}>
-        <SegmentedControl<StockPeriod>
-          size="sm"
-          value={period}
-          onChange={onStockPeriodChange}
-          options={STOCK_PERIOD_OPTIONS}
-        />
-      </View>
-
-      {/* ── Variación neta del período (hero number) ── */}
-      <View style={{ marginTop: space['3'] }}>
-        <Text style={displayStyle}>{signedAmount(variation)}</Text>
+        <Text style={displayStyle}>
+          {variation > 0 ? '+ ' : variation < 0 ? '− ' : ''}
+          $ {splitMoneyParts(variation).int}
+          <Text
+            style={{
+              fontSize: Math.round(tokenText.size['5xl'] * 0.5),
+              color: color.text.tertiary,
+              fontWeight: tokenText.weight.medium as '500',
+            }}
+          >
+            ,{splitMoneyParts(variation).dec}
+          </Text>
+        </Text>
       </View>
 
       {/* ── Comparativa "vs período anterior" ── */}

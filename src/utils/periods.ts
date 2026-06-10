@@ -91,6 +91,18 @@ export function todayLocalISO(): string {
   return toLocalISODate(new Date());
 }
 
+/**
+ * Inversa de `toLocalISODate`: 'YYYY-MM-DD' → Date a medianoche LOCAL.
+ *
+ * NO usar `new Date('YYYY-MM-DD')` — el constructor interpreta ese formato
+ * como UTC y en BA (UTC-3) devuelve el día anterior a las 21:00. Mismo bug
+ * que LESSONS #2 pero en la dirección de lectura.
+ */
+export function parseLocalISODate(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 // Alias local para no cambiar los usos internos del módulo.
 const toISODate = toLocalISODate;
 

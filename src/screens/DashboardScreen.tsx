@@ -47,7 +47,7 @@ import {
 import Money, { formatMoney } from '../components/Money';
 import HeroMetricCard   from '../components/HeroMetricCard';
 import MiPlataCard      from '../components/MiPlataCard';
-import MonthFlowCard    from '../components/MonthFlowCard';
+import FlowPairSection  from '../components/FlowPairSection';
 import PeriodBalanceCard from '../components/PeriodBalanceCard';
 import Container        from '../components/Container';
 import FAB              from '../components/FAB';
@@ -90,6 +90,19 @@ const EMPTY_HOURS: HoursSummary = {
   estimatedRevenue: 0, entries: 0,
 };
 
+/**
+ * G-1 (GETVISION_DESIGN, 2026-06-10) — selector de período ÚNICO.
+ * Antes había DOS relojes en pantalla: Hoy/Semana/Mes/Año dentro de MiPlata
+ * y Día/Semana/Mes para el bloque flow. Ahora un solo SegmentedControl
+ * gobierna TODO lo que está debajo; MiPlata deriva su StockPeriod de acá.
+ * "Año" migra a la futura tab Stats (F1-D #8).
+ */
+const STOCK_OF: Record<Period, StockPeriod> = {
+  day: 'today',
+  week: 'week',
+  month: 'month',
+};
+
 /** Saludo según hora del día. Pequeño detalle de calidez. */
 function greetingFor(date: Date = new Date()): string {
   const h = date.getHours();
@@ -123,12 +136,9 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   const [stock, setStock]                     = useState<StockSummary>(EMPTY_STOCK);
   const [hours, setHours]                     = useState<HoursSummary>(EMPTY_HOURS);
   const [heroMetric, setHeroMetric]           = useState<MetricResultWithPeriod | null>(null);
-  /** F1-M Fase B — Snapshot de MiPlata con current + previous + delta. */
+  /** F1-M Fase B — Snapshot de MiPlata con current + previous + delta.
+   *  G-1: su período se deriva del selector unificado (`STOCK_OF[period]`). */
   const [miPlataSnapshot, setMiPlataSnapshot] = useState<MiPlataSnapshot | null>(null);
-  /** Período del selector temporal de MiPlata (Hoy/Sem/Mes/Año).
-   *  Default 'month' alineado con el default del SegmentedControl flow — el
-   *  usuario abre la app y ve "balance ahora + ¿cómo varió este mes?". */
-  const [stockPeriod, setStockPeriod]         = useState<StockPeriod>('month');
   /** F1-M.2 — Ingresos + Costos del período con doble desglose. Solo modo simple. */
   const [monthFlow, setMonthFlow]             = useState<MonthFlowResult | null>(null);
   /** F1-M.2 — eje del toggle Canal/Etiqueta. Optimistic en setter, persiste a businesses. */
@@ -197,7 +207,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
         needHours ? hoursLogRepo.getSummaryForCurrentMonth(biz.id) : Promise.resolve(EMPTY_HOURS),
         needHero ? analyticsRepo.getHeroMetricForPeriod(biz, period) : Promise.resolve(null),
         transactionsRepo.listRecent(biz.id, recentLimit),
-        analyticsRepo.getMiPlataSnapshot(biz.id, stockPeriod),  // F1-M Fase B
+        analyticsRepo.getMiPlataSnapshot(biz.id, STOCK_OF[period]),  // F1-M Fase B + G-1
         categoriesRepo.listForBusiness(biz.id),  // F1-L
         needFlow ? analyticsRepo.getMonthFlow(biz.id, period) : Promise.resolve(null),  // F1-M.2
       ]);
@@ -222,13 +232,17 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
 
   useEffect(() => { loadDashboardData(); }, [loadDashboardData]);
 
-  /** Cambio de período en el SegmentedControl — recargamos según el modo activo. */
+  /** Cambio de período en el SegmentedControl ÚNICO (G-1) — recarga flow +
+   *  MiPlata en simple, hero en detailed. Un reloj, todo sincronizado. */
   const handlePeriodChange = (next: Period) => {
     setPeriod(next);
     if (!business) return;
     const detail = getDetailLevel(business);
     if (detail === 'detailed') loadHeroForPeriod(business, next);
-    if (detail === 'simple')   loadFlowForPeriod(business, next);
+    if (detail === 'simple') {
+      loadFlowForPeriod(business, next);
+      loadMiPlataForPeriod(business, STOCK_OF[next]);
+    }
   };
 
   /**
@@ -253,12 +267,6 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
     const updated = await businessesRepo.update(business.id, { expense_breakdown_axis: next });
     if (updated) setBusiness(updated);
     else setExpenseAxis(previous);
-  };
-
-  /** F1-M Fase B — cambio del selector temporal de MiPlata. */
-  const handleStockPeriodChange = (next: StockPeriod) => {
-    setStockPeriod(next);
-    if (business) loadMiPlataForPeriod(business, next);
   };
 
   const closeModal = () => {
@@ -445,62 +453,39 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
     <>
       {monthFlow ? (
         <>
-          {/* SegmentedControl Día/Semana/Mes — controla solo los bloques flow. */}
-          <View style={{ marginTop: space['4'] }}>
-            <SegmentedControl<Period>
-              value={period}
-              onChange={handlePeriodChange}
-              options={[
-                { value: 'day', label: 'Día' },
-                { value: 'week', label: 'Semana' },
-                { value: 'month', label: 'Mes' },
-              ]}
-            />
-          </View>
-
-          {/* F1-M.2/F1-M.3 + Fase A.A2 — Ingresos → Costos → Balance.
-              Orden estado-de-resultados: el Balance cierra el cálculo al pie
-              (Ingresos − Costos = Balance), siguiendo la lectura natural.
-              Tone de costos: gris neutro por default, rojo solo si el balance
-              del período es negativo (regla §5.4.3 / Q3 cerrada por CEO). */}
+          {/* G-3 (GETVISION_DESIGN) — Balance ARRIBA como héroe del período,
+              con el gráfico <PeriodBars/> contando la historia día a día (G-2).
+              D-9: Ingresos/Costos ahora son un PAR horizontal (tiles lado a
+              lado, uso del ancho de pantalla) con detalle expandible a ancho
+              completo — el desglose canal/etiqueta + tap-to-history intactos
+              ("¿cuánto cobré en efectivo esta semana?" vive ahí). */}
           <Stack gap="3" style={{ marginTop: space['4'] }}>
-            <MonthFlowCard
-              variant="income"
-              data={monthFlow.income}
-              axis={incomeAxis}
-              onAxisChange={handleIncomeAxisChange}
-              prevLabel={monthFlow.prevLabel}
-              onLinePress={(key, label) =>
-                onOpenHistory({
-                  type: 'income',
-                  axis: incomeAxis,
-                  key,
-                  label,
-                  period,
-                })
-              }
-            />
-            <MonthFlowCard
-              variant="expense"
-              data={monthFlow.expense}
-              axis={expenseAxis}
-              onAxisChange={handleExpenseAxisChange}
-              tone={monthFlow.income.total - monthFlow.expense.total < 0 ? 'danger' : 'neutral'}
-              prevLabel={monthFlow.prevLabel}
-              onLinePress={(key, label) =>
-                onOpenHistory({
-                  type: 'expense',
-                  axis: expenseAxis,
-                  key,
-                  label,
-                  period,
-                })
-              }
-            />
             <PeriodBalanceCard
               income={monthFlow.income.total}
               expense={monthFlow.expense.total}
               period={period}
+              series={monthFlow.series}
+              prevDailyAvgIncome={monthFlow.prevDailyAvgIncome}
+              prevIncome={monthFlow.income.previousTotal}
+              prevExpense={monthFlow.expense.previousTotal}
+              prevLabel={monthFlow.prevLabel}
+            />
+            <FlowPairSection
+              flow={monthFlow}
+              period={period}
+              incomeAxis={incomeAxis}
+              expenseAxis={expenseAxis}
+              onIncomeAxisChange={handleIncomeAxisChange}
+              onExpenseAxisChange={handleExpenseAxisChange}
+              onLinePress={(kind, key, label) =>
+                onOpenHistory({
+                  type: kind,
+                  axis: kind === 'income' ? incomeAxis : expenseAxis,
+                  key,
+                  label,
+                  period,
+                })
+              }
             />
           </Stack>
         </>
@@ -684,23 +669,40 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
             </Stack>
           </Stack>
 
-          {/* F1-M.1 — "Mi plata hoy" (stock) con composición por canal,
-              arriba en modo simple. Hereda de F1-J.5a el tap-to-pending
-              (atajo directo a MovementForm > Pendientes, su tab default).
-              F1-M.4 conectará `onChannelPress` para tap-to-filter por cuenta. */}
+          {/* G-1 — el ÚNICO selector de período de la pantalla. Gobierna
+              MiPlata + Balance + Ingresos/Costos. Pegado arriba para que el
+              usuario entienda que todo lo de abajo responde al mismo reloj. */}
+          {detailLevel === 'simple' ? (
+            <View style={{ marginBottom: space['3'] }}>
+              <SegmentedControl<Period>
+                value={period}
+                onChange={handlePeriodChange}
+                options={[
+                  { value: 'day', label: 'Hoy' },
+                  { value: 'week', label: 'Semana' },
+                  { value: 'month', label: 'Mes' },
+                ]}
+              />
+            </View>
+          ) : null}
+
+          {/* F1-M.1 — "Mi plata" con composición por canal, arriba en modo
+              simple. Hereda de F1-J.5a el tap-to-pending (atajo directo a
+              MovementForm > Pendientes). El tap en una cuenta abre el historial
+              filtrado por esa cuenta EN EL PERÍODO ACTIVO (no más 'month' fijo)
+              — "¿cuánto cobré en efectivo esta semana?" en dos taps. */}
           {detailLevel === 'simple' && miPlataSnapshot ? (
             <View style={{ marginBottom: space['3'] }}>
               <MiPlataCard
                 snapshot={miPlataSnapshot}
                 onPendingPress={() => setActiveModal('movements')}
-                onStockPeriodChange={handleStockPeriodChange}
                 onChannelPress={(account) =>
                   onOpenHistory({
                     type: 'all',
                     axis: 'channel',
                     key: account.id,
                     label: account.name,
-                    period: 'month',
+                    period,
                   })
                 }
               />

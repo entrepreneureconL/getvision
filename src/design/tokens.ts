@@ -84,36 +84,41 @@ export const color = {
     subtle: 'rgba(31,133,121,0.10)',
   },
 
-  /** Verde "ingresos". Mantiene el valor histórico para no romper la lectura. */
+  /** Verde "ingresos" — emerald (D-10, 2026-06-10). La paleta semántica migró
+   *  de los flat-UI 2015 (#27AE60/#C0392B) a jewel tones: más luminosos sobre
+   *  fondo oscuro y alineados al pairing emerald↔teal que la investigación
+   *  2026 marca como tendencia fintech (GETVISION_DESIGN §3.2). El emerald
+   *  además armoniza con el teal de marca #1F8579 (misma familia). */
   success: {
-    base: '#27AE60',
-    hover: '#1F8C4D',
-    muted: '#1A6B3B',
-    subtle: 'rgba(39,174,96,0.10)',
+    base: '#10B981',
+    hover: '#0D9668',
+    muted: '#065F46',
+    subtle: 'rgba(16,185,129,0.10)',
   },
 
-  /** Rojo "egresos / alerta". Mantiene el valor histórico. */
+  /** Rojo "egresos / alerta" — rose. Menos terroso que el #C0392B histórico,
+   *  mejor contraste sobre bg.base sin gritar. */
   danger: {
-    base: '#C0392B',
-    hover: '#9A2D22',
-    muted: '#7A241C',
-    subtle: 'rgba(192,57,43,0.10)',
+    base: '#EF4444',
+    hover: '#DC2626',
+    muted: '#7F1D1D',
+    subtle: 'rgba(239,68,68,0.10)',
   },
 
-  /** Naranja "atención" — usado en métricas porcentuales (margin, cost ratio). */
+  /** Ámbar "atención" — métricas porcentuales y pendientes. */
   warning: {
-    base: '#E67E22',
-    hover: '#B5631A',
-    muted: '#8A4814',
-    subtle: 'rgba(230,126,34,0.10)',
+    base: '#F59E0B',
+    hover: '#D97706',
+    muted: '#78350F',
+    subtle: 'rgba(245,158,11,0.10)',
   },
 
-  /** Violeta "info / count" — usado en métricas tipo "ticket promedio". */
+  /** Violeta "info / count" — métricas tipo "ticket promedio". */
   info: {
-    base: '#9B59B6',
-    hover: '#7A4192',
-    muted: '#5A3470',
-    subtle: 'rgba(155,89,182,0.10)',
+    base: '#8B5CF6',
+    hover: '#7C3AED',
+    muted: '#4C1D95',
+    subtle: 'rgba(139,92,246,0.10)',
   },
 } as const;
 

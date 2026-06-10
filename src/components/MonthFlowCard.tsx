@@ -35,6 +35,7 @@ import type {
 } from '../repos/analytics';
 import { PENDING_KEY, UNLABELED_KEY } from '../utils/historyFilters';
 import type { BreakdownAxis } from '../schemas/business';
+import type { Period } from '../utils/periods';
 import Money, { formatMoney } from './Money';
 import {
   Text,
@@ -55,12 +56,22 @@ type Props = {
   data: FlowBlock;
   axis: BreakdownAxis;
   onAxisChange: (next: BreakdownAxis) => void;
+  /** G-1 (GETVISION_DESIGN) — período activo del selector unificado. El título
+   *  lo refleja ("Ingresos del día/de la semana/del mes"); antes decía siempre
+   *  "del mes" aunque el usuario mirara Día — número honesto, label mentiroso. */
+  period: Period;
   /** F1-M.4 — tap en una línea de composición → historial filtrado. */
   onLinePress?: (key: string, label: string) => void;
   /** Color del total. §5.4.3: 'danger' solo cuando el balance del mes < 0. */
   tone?: Tone;
   /** F1-M Fase B — label del período anterior ("ayer", "mes pasado", etc.). */
   prevLabel?: string;
+};
+
+const PERIOD_NOUN: Record<Period, string> = {
+  day:   'del día',
+  week:  'de la semana',
+  month: 'del mes',
 };
 
 const VARIANT_COPY: Record<Variant, {
@@ -70,8 +81,8 @@ const VARIANT_COPY: Record<Variant, {
   plural: string;
   totalAccent: 'success' | 'neutral';
 }> = {
-  income:  { emoji: '📈', title: 'Ingresos del mes', singular: 'venta',      plural: 'ventas',      totalAccent: 'success' },
-  expense: { emoji: '📉', title: 'Costos del mes',   singular: 'movimiento', plural: 'movimientos', totalAccent: 'neutral' },
+  income:  { emoji: '📈', title: 'Ingresos', singular: 'venta',      plural: 'ventas',      totalAccent: 'success' },
+  expense: { emoji: '📉', title: 'Costos',   singular: 'movimiento', plural: 'movimientos', totalAccent: 'neutral' },
 };
 
 export default function MonthFlowCard({
@@ -79,6 +90,7 @@ export default function MonthFlowCard({
   data,
   axis,
   onAxisChange,
+  period,
   onLinePress,
   tone = 'neutral',
   prevLabel,
@@ -136,7 +148,7 @@ export default function MonthFlowCard({
       {/* ── Header con título + chevron de expand ── */}
       <Stack direction="row" justify="space-between" align="center">
         <Text variant="micro" color="secondary" uppercase>
-          {copy.emoji}  {copy.title}
+          {copy.emoji}  {copy.title} {PERIOD_NOUN[period]}
         </Text>
         {total > 0 ? (
           <TouchableOpacity
@@ -153,7 +165,7 @@ export default function MonthFlowCard({
 
       {/* ── Total + contador ── */}
       <View style={{ marginTop: space['3'] }}>
-        <Money amount={total} prefix="$ " style={displayStyle} />
+        <Money amount={total} prefix="$ " style={displayStyle} mutedDecimals />
       </View>
       {count > 0 ? (
         <Text variant="caption" color="tertiary" style={{ marginTop: space['1'] }}>

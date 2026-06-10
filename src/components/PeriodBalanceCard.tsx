@@ -1,27 +1,31 @@
 /**
- * <PeriodBalanceCard /> — balance consolidado del período (F1-M Fase A · A2).
+ * <PeriodBalanceCard /> — balance del período + gráfico de barras (D-2/G-3).
  *
- * Vive entre los dos MonthFlowCard (Ingresos y Costos) y contesta la pregunta
- * "¿este mes terminó a favor o en contra?". Es derivada — no consulta DB.
+ * Rediseño GETVISION_DESIGN (2026-06-10): de card de cierre subordinada a
+ * HÉROE de la sección flow. La razón (gap G-3): el Balance es el dato que más
+ * le importa al usuario ("¿gané o perdí?") y estaba último, al mismo peso
+ * visual que Ingresos/Costos. Ahora abre la sección, con la respuesta en
+ * grande y el gráfico <PeriodBars/> contando la historia día a día.
  *
- * Visual: card más chica que un MonthFlow (padding md vs lg, valor 3xl vs 4xl)
- * para que la jerarquía de lectura sea Ingresos > Balance > Costos.
+ * Sigue siendo derivada — no consulta DB. Todo viene del MonthFlowResult que
+ * el Dashboard ya cargó (cero costo extra).
  *
- * Reglas de color (consistente con MASTER §13 honestidad numérica):
- *   - balance > 0  → success (verde)
- *   - balance < 0  → danger  (rojo)
- *   - balance == 0 → text.secondary (gris)
+ * Reglas de color (MASTER §13 honestidad numérica):
+ *   - balance > 0  → success / < 0 → danger / == 0 → text.secondary.
+ *   - El delta vs período anterior usa la misma semántica (subir es bueno).
  *
- * El sub-texto "margen X%" aparece solo si income > 0 — sin ingresos no hay
- * margen calculable. Es informativo: (balance / income) * 100.
+ * El gráfico solo se muestra para week/month (≥ 2 puntos). Para 'day' el
+ * <PeriodBars/> devuelve null solo — un día no es una serie.
  */
 
 import { View } from 'react-native';
 import type { Period } from '../utils/periods';
-import Money from './Money';
+import type { FlowSeriesPoint } from '../repos/analytics';
+import Money, { formatMoney } from './Money';
 import {
   Text,
   Card,
+  PeriodBars,
   color,
   space,
   text as tokenText,
@@ -31,6 +35,15 @@ type Props = {
   income: number;
   expense: number;
   period: Period;
+  /** D-2 — serie diaria del período (de MonthFlowResult.series). */
+  series?: FlowSeriesPoint[];
+  /** D-2 — promedio diario de ingresos del período anterior (línea "prom"). */
+  prevDailyAvgIncome?: number;
+  /** Totales del período anterior, para el delta del balance. */
+  prevIncome?: number;
+  prevExpense?: number;
+  /** Label del período anterior ("ayer", "semana pasada", "Mayo 2026"). */
+  prevLabel?: string;
 };
 
 const PERIOD_LABEL: Record<Period, string> = {
@@ -39,36 +52,60 @@ const PERIOD_LABEL: Record<Period, string> = {
   month: 'Balance del mes',
 };
 
-export default function PeriodBalanceCard({ income, expense, period }: Props) {
+export default function PeriodBalanceCard({
+  income,
+  expense,
+  period,
+  series,
+  prevDailyAvgIncome = 0,
+  prevIncome,
+  prevExpense,
+  prevLabel,
+}: Props) {
   const balance = income - expense;
 
   let balanceColor: string = color.text.secondary;
   if (balance > 0) balanceColor = color.success.base;
   else if (balance < 0) balanceColor = color.danger.base;
 
-  // Tamaño 2xl (24px) + padding sm: la card es claramente subordinada a MiPlata
-  // (44px, 5xl) y MonthFlow (36px, 4xl). Cierra el cálculo como resumen, no
-  // compite con ellas por atención visual.
+  // 3xl: héroe de la sección flow, un escalón debajo del 5xl de MiPlata.
+  // Jerarquía de pantalla: MiPlata (5xl) > Balance (3xl) > Ingresos/Costos (2xl).
   const displayStyle = {
-    fontSize: tokenText.size['2xl'],
-    lineHeight: tokenText.lineHeight['2xl'],
+    fontSize: tokenText.size['3xl'],
+    lineHeight: tokenText.lineHeight['3xl'],
     fontWeight: tokenText.weight.bold as '700',
     letterSpacing: tokenText.letterSpacing.tight,
     color: balanceColor,
   };
 
-  // Margen = balance / income. Solo se muestra si income > 0.
-  // Redondeo a entero — un decimal es ruido visual en este contexto.
   const marginPct = income > 0 ? Math.round((balance / income) * 100) : null;
 
+  // Delta del balance vs período anterior — misma semántica que MiPlata.
+  const hasPrev = prevIncome != null && prevExpense != null && prevLabel != null;
+  const prevBalance = hasPrev ? prevIncome! - prevExpense! : 0;
+  const deltaAmount = balance - prevBalance;
+  const showDelta = hasPrev && (balance !== 0 || prevBalance !== 0) && deltaAmount !== 0;
+  let deltaColor: string = color.text.tertiary;
+  if (deltaAmount > 0) deltaColor = color.success.base;
+  else if (deltaAmount < 0) deltaColor = color.danger.base;
+  const arrow = deltaAmount > 0 ? '↑' : '↓';
+
+  const barPoints = (series ?? []).map(p => ({
+    key: p.date,
+    label: p.label,
+    up: p.income,
+    down: p.expense,
+    emphasized: p.isToday,
+  }));
+
   return (
-    <Card variant="surface" padding="sm">
+    <Card variant="surface" padding="lg">
       <Text variant="micro" color="secondary" uppercase>
-        ⚖️  {PERIOD_LABEL[period]}
+        {PERIOD_LABEL[period]}
       </Text>
 
       <View style={{ marginTop: space['2'] }}>
-        <Money amount={balance} prefix="$ " style={displayStyle} />
+        <Money amount={balance} prefix="$ " style={displayStyle} mutedDecimals />
       </View>
 
       {marginPct !== null ? (
@@ -76,6 +113,55 @@ export default function PeriodBalanceCard({ income, expense, period }: Props) {
           {marginPct >= 0 ? '+' : ''}{marginPct}% margen
         </Text>
       ) : null}
+
+      {showDelta ? (
+        <Text variant="caption" style={{ color: deltaColor, marginTop: space['1'] }}>
+          {arrow} {deltaAmount >= 0 ? '+' : '−'}$ {formatMoney(deltaAmount)}
+          {'  '}vs {prevLabel}
+        </Text>
+      ) : null}
+
+      {/* ── Gráfico del período (D-2) — null solo si < 2 puntos ── */}
+      {barPoints.length >= 2 ? (
+        <>
+          <View style={{ marginTop: space['4'] }}>
+            <PeriodBars
+              points={barPoints}
+              avgLine={prevDailyAvgIncome}
+              avgLabel="prom"
+            />
+          </View>
+
+          {/* Leyenda mínima — 1 línea, sin competir con el dato. */}
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: space['2'],
+              marginTop: space['3'],
+            }}
+          >
+            <LegendDot tint={color.success.base} />
+            <Text variant="micro" color="tertiary">Ingresos</Text>
+            <LegendDot tint={color.danger.base} />
+            <Text variant="micro" color="tertiary">Costos</Text>
+            {prevDailyAvgIncome > 0 ? (
+              <Text variant="micro" color="tertiary">
+                ┄ prom. {prevLabel ?? 'período anterior'}
+              </Text>
+            ) : null}
+          </View>
+        </>
+      ) : null}
     </Card>
+  );
+}
+
+function LegendDot({ tint }: { tint: string }) {
+  return (
+    <View
+      style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: tint }}
+    />
   );
 }

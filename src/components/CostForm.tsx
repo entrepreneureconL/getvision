@@ -273,45 +273,37 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction, 
             </View>
           )}
 
-          <Text style={styles.label}>Fecha</Text>
-          <TextInput
-            style={styles.input}
-            value={date}
-            onChangeText={setDate}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor="#4A4A6A"
-          />
-
-          <Text style={styles.label}>Descripción (opcional)</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Ej: Compra de harina, 50kg..."
-            placeholderTextColor="#4A4A6A"
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            numberOfLines={3}
-            maxLength={120}
-          />
-          <Text style={styles.charCount}>{description.length}/120</Text>
-
-          {error.length > 0 && (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>⚠️ {error}</Text>
+          {/* D-8: Fecha + Descripción comparten fila — uso horizontal de la
+              pantalla y un bloque vertical menos. Descripción pasó a una
+              línea (maxLength 120 se mantiene). */}
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldDate}>
+              <Text style={styles.label}>Fecha</Text>
+              <TextInput
+                style={styles.input}
+                value={date}
+                onChangeText={setDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#4A4A6A"
+              />
             </View>
-          )}
+            <View style={styles.fieldDescription}>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Descripción</Text>
+                <Text style={styles.charCount}>{description.length}/120</Text>
+              </View>
+              <TextInput
+                style={styles.input}
+                placeholder="Ej: Harina, 50kg"
+                placeholderTextColor="#4A4A6A"
+                value={description}
+                onChangeText={setDescription}
+                maxLength={120}
+              />
+            </View>
+          </View>
 
-          <TouchableOpacity
-            style={[styles.saveBtn, !canSubmit && styles.saveBtnDisabled]}
-            onPress={handleSave}
-            disabled={!canSubmit}
-          >
-            {loading
-              ? <ActivityIndicator color="#FFFFFF" />
-              : <Text style={styles.saveBtnText}>{isEdit ? 'Guardar cambios' : 'Guardar costo'}</Text>
-            }
-          </TouchableOpacity>
-
+          {/* Eliminar al final del contenido — destructivo, con fricción a propósito. */}
           {isEdit && (
             <TouchableOpacity
               style={[styles.deleteBtn, deleting && { opacity: 0.5 }]}
@@ -326,6 +318,26 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction, 
           )}
 
         </ScrollView>
+
+        {/* D-8: footer FIJO fuera del scroll — el botón Guardar siempre visible,
+            sin scrollear para encontrarlo. El error vive junto al botón. */}
+        <View style={styles.footer}>
+          {error.length > 0 && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>⚠️ {error}</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            style={[styles.saveBtn, !canSubmit && styles.saveBtnDisabled]}
+            onPress={handleSave}
+            disabled={!canSubmit}
+          >
+            {loading
+              ? <ActivityIndicator color="#FFFFFF" />
+              : <Text style={styles.saveBtnText}>{isEdit ? 'Guardar cambios' : 'Guardar costo'}</Text>
+            }
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* F1-L: modal de creación de categoría custom. */}
@@ -353,33 +365,39 @@ const styles = StyleSheet.create({
   },
   panel: {
     backgroundColor: '#12122A', borderTopLeftRadius: 24,
-    borderTopRightRadius: 24, padding: 24, maxHeight: '90%',
-    borderTopWidth: 1, borderColor: '#B85C00',
+    borderTopRightRadius: 24, padding: 18, paddingBottom: 0,
+    maxHeight: '90%', borderTopWidth: 1, borderColor: '#B85C00',
   },
   panelHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 24,
+    alignItems: 'center', marginBottom: 10,
   },
-  panelTitle: { color: '#FFFFFF', fontSize: 20, fontWeight: 'bold' },
+  panelTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' },
   closeText: { color: '#7F8C8D', fontSize: 20 },
-  label: { color: '#A0A0B8', fontSize: 13, marginBottom: 8, marginTop: 16 },
+  label: { color: '#A0A0B8', fontSize: 12, marginBottom: 6, marginTop: 12 },
+  labelRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'flex-end',
+  },
+  fieldRow: { flexDirection: 'row', gap: 10 },
+  fieldDate: { flexBasis: '38%' },
+  fieldDescription: { flex: 1 },
   amountRow: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#1A1A2E', borderRadius: 12,
-    borderWidth: 1, borderColor: '#B85C00', paddingHorizontal: 16,
+    borderWidth: 1, borderColor: '#B85C00', paddingHorizontal: 14,
   },
-  currency: { color: '#B85C00', fontSize: 24, fontWeight: 'bold', marginRight: 8 },
+  currency: { color: '#B85C00', fontSize: 20, fontWeight: 'bold', marginRight: 8 },
   amountInput: {
-    flex: 1, color: '#FFFFFF', fontSize: 32,
-    fontWeight: 'bold', paddingVertical: 16,
+    flex: 1, color: '#FFFFFF', fontSize: 26,
+    fontWeight: 'bold', paddingVertical: 10,
   },
   input: {
     backgroundColor: '#1A1A2E', color: '#FFFFFF', borderRadius: 10,
-    paddingHorizontal: 16, paddingVertical: 14, fontSize: 15,
+    paddingHorizontal: 12, paddingVertical: 10, fontSize: 14,
     borderWidth: 1, borderColor: '#2A2A4A',
   },
-  textArea: { height: 80, textAlignVertical: 'top' },
-  charCount: { color: '#4A4A6A', fontSize: 11, textAlign: 'right', marginTop: 4 },
+  charCount: { color: '#4A4A6A', fontSize: 10, marginBottom: 6 },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
@@ -396,7 +414,7 @@ const styles = StyleSheet.create({
   chipTextActive: { color: '#FFFFFF' },
   errorBox: {
     backgroundColor: '#2A0A0A', borderWidth: 1, borderColor: '#E74C3C',
-    borderRadius: 8, padding: 12, marginTop: 16,
+    borderRadius: 8, padding: 10, marginBottom: 10,
   },
   errorText: { color: '#E74C3C', fontSize: 13 },
   /** F1-J.5b: caja de ayuda contextual cuando el pago queda pendiente. */
@@ -405,16 +423,21 @@ const styles = StyleSheet.create({
     borderRadius: 10, padding: 12, marginTop: 12,
   },
   infoText: { color: '#D6BF66', fontSize: 12, lineHeight: 17 },
+  /** D-8: footer fijo — separado del scroll, el botón nunca queda fuera de vista. */
+  footer: {
+    paddingTop: 12, paddingBottom: 16,
+    borderTopWidth: 1, borderTopColor: '#1C1C30',
+  },
   saveBtn: {
-    backgroundColor: '#B85C00', paddingVertical: 16,
-    borderRadius: 12, alignItems: 'center', marginTop: 24, marginBottom: 8,
+    backgroundColor: '#B85C00', paddingVertical: 13,
+    borderRadius: 12, alignItems: 'center',
   },
   saveBtnDisabled: { backgroundColor: '#2B1A00', opacity: 0.6 },
-  saveBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
+  saveBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: 'bold' },
   deleteBtn: {
-    paddingVertical: 14, borderRadius: 12, alignItems: 'center',
-    marginTop: 12, marginBottom: 8,
+    paddingVertical: 11, borderRadius: 12, alignItems: 'center',
+    marginTop: 14, marginBottom: 4,
     borderWidth: 1, borderColor: '#7A241C', backgroundColor: 'rgba(192,57,43,0.08)',
   },
-  deleteBtnText: { color: '#E74C3C', fontSize: 14, fontWeight: '600' },
+  deleteBtnText: { color: '#E74C3C', fontSize: 13, fontWeight: '600' },
 });

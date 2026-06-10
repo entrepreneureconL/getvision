@@ -7,16 +7,18 @@
  * NO importar piezas individuales desde sus archivos a menos que necesites
  * el `default export` del archivo (caso raro).
  *
- * Status F1-D: tokens + 9 primitivos base.
+ * Status F1-D + D-2: tokens + 10 primitivos.
  *   Texto/Layout:  Heading, Text, Stack, Divider
  *   Superficies:   Card
  *   Acción:        Button
  *   Forms:         Input
  *   Estado/Filtro: SegmentedControl, Chip
+ *   Datos:         PeriodBars (D-2, GETVISION_DESIGN §4.3)
  */
 
 export { color, space, radius, text, shadow, tokens } from './tokens';
 export type { SpaceKey, RadiusKey, SizeKey, WeightKey } from './tokens';
+export type { PeriodBarPoint } from './components/PeriodBars';
 
 export { default as Heading } from './components/Heading';
 export { default as Text } from './components/Text';
@@ -27,3 +29,4 @@ export { default as Button } from './components/Button';
 export { default as Input } from './components/Input';
 export { default as SegmentedControl } from './components/SegmentedControl';
 export { default as Chip } from './components/Chip';
+export { default as PeriodBars } from './components/PeriodBars';

@@ -21,11 +21,17 @@
  * que además devuelve un widget con color. Como un f-string + estilo en uno.
  */
 
-import { Text, type TextStyle, type StyleProp } from 'react-native';
+import { Text, StyleSheet, type TextStyle, type StyleProp } from 'react-native';
+import { color as dsColor } from '../design';
 
-const POSITIVE_COLOR = '#27AE60'; // verde "ingresos"
-const NEGATIVE_COLOR = '#C0392B'; // rojo "alerta"
-const NEUTRAL_COLOR = '#7F8C8D';  // gris "cero/neutro"
+// D-10: los defaults vienen de los tokens del DS (antes hex hardcodeado
+// pre-F1-D). Si la paleta semántica cambia, este componente la hereda.
+const POSITIVE_COLOR = dsColor.success.base;
+const NEGATIVE_COLOR = dsColor.danger.base;
+const NEUTRAL_COLOR = dsColor.text.tertiary;
+
+/** Ratio de tamaño de los decimales atenuados respecto del entero (G-6). */
+const MUTED_DECIMALS_RATIO = 0.55;
 
 type Props = {
   /** Monto en number. Puede ser negativo. */
@@ -42,7 +48,19 @@ type Props = {
   positiveColor?: string;
   /** Override del color cuando colored=true y negativo. */
   negativeColor?: string;
+  /** G-6 (GETVISION_DESIGN) — decimales ",00" más chicos y apagados.
+   *  El ojo va a los enteros; los centavos son ruido en montos héroe.
+   *  Solo usar en montos grandes (2xl+). En listas densas, dejar default. */
+  mutedDecimals?: boolean;
 };
+
+/** Separa el monto formateado en parte entera y decimal ("1.234,56" → ["1.234","56"]).
+ *  Exportado para componentes que componen el monto a mano (MiPlataCard). */
+export function splitMoneyParts(amount: number): { int: string; dec: string } {
+  const formatted = formatMoney(amount);
+  const [int, dec] = formatted.split(',');
+  return { int, dec: dec ?? '00' };
+}
 
 export function formatMoney(amount: number): string {
   return Math.abs(amount).toLocaleString('es-AR', {
@@ -64,15 +82,36 @@ export default function Money({
   style,
   positiveColor = POSITIVE_COLOR,
   negativeColor = NEGATIVE_COLOR,
+  mutedDecimals = false,
 }: Props) {
-  const text = `${prefix}${formatBalance(amount)}${suffix}`;
-
   let color: string | undefined;
   if (colored) {
     if (amount > 0) color = positiveColor;
     else if (amount < 0) color = negativeColor;
     else color = NEUTRAL_COLOR;
   }
+
+  if (mutedDecimals) {
+    // "(−1.234,56)" se descompone en: "(−1.234" + ",56" chico/apagado + ")".
+    const { int, dec } = splitMoneyParts(amount);
+    const isNegative = amount < 0;
+    const flat = StyleSheet.flatten(style) ?? {};
+    const baseSize = typeof flat.fontSize === 'number' ? flat.fontSize : 15;
+    const decStyle: TextStyle = {
+      fontSize: Math.round(baseSize * MUTED_DECIMALS_RATIO),
+      color: dsColor.text.tertiary,
+      fontWeight: '500',
+    };
+    return (
+      <Text style={[color ? { color } : null, style]}>
+        {prefix}{isNegative ? '(−' : ''}{int}
+        <Text style={decStyle}>,{dec}</Text>
+        {isNegative ? ')' : ''}{suffix}
+      </Text>
+    );
+  }
+
+  const text = `${prefix}${formatBalance(amount)}${suffix}`;
 
   return (
     <Text style={[color ? { color } : null, style]}>

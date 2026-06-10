@@ -29,7 +29,16 @@ import {
   type HeroMetricKey,
   type HeroMetricSpec,
 } from '../utils/heroMetrics';
-import { getPeriodRange, getStockPeriodRange, type Period, type StockPeriod } from '../utils/periods';
+import {
+  getPeriodRange,
+  getStockPeriodRange,
+  parseLocalISODate,
+  toLocalISODate,
+  todayLocalISO,
+  type Period,
+  type PeriodRange,
+  type StockPeriod,
+} from '../utils/periods';
 import {
   transactionsRepo,
   type DashboardKPIs,
@@ -186,6 +195,26 @@ export type MonthFlowResult = {
   expense: FlowBlock;
   /** F1-M Fase B — label del período anterior ("ayer", "semana pasada", etc.). */
   prevLabel: string;
+  /** D-2 (GETVISION_DESIGN) — serie diaria para el gráfico <PeriodBars/>.
+   *  Un punto por día desde el inicio del período hasta HOY (sin días futuros:
+   *  una barra en $0 el día 25 cuando todavía es 20 miente). */
+  series: FlowSeriesPoint[];
+  /** Promedio diario de ingresos del período ANTERIOR — alimenta la línea
+   *  punteada "prom" del gráfico ("hoy vs mi normal"). 0 si no hubo. */
+  prevDailyAvgIncome: number;
+};
+
+/**
+ * D-2 — un día del gráfico de barras del período (estilo iOS Screen Time).
+ * `label` ya viene listo para el eje: inicial del día en semana ('L','M'...),
+ * número de día espaciado en mes ('1','5','10'...), '' en días sin label.
+ */
+export type FlowSeriesPoint = {
+  date: string;
+  label: string;
+  income: number;
+  expense: number;
+  isToday: boolean;
 };
 
 /**
@@ -508,6 +537,76 @@ function buildFlowBlock(
   return { total, count, byChannel, byCategory, previousTotal, previousCount };
 }
 
+/**
+ * D-2 (GETVISION_DESIGN) — construye la serie diaria del gráfico de barras.
+ * Puro: recibe las transactions YA cargadas por getMonthFlow (cero round-trips
+ * extra). Excluye `_extraordinary` igual que buildFlowBlock — el gráfico debe
+ * sumar lo mismo que los totales de las cards o miente.
+ *
+ * Labels por período:
+ *   week  → inicial del día (L M X J V S D).
+ *   month → número de día solo en 1 y múltiplos de 5 (eje respirable).
+ *   day   → 'Hoy' (un solo punto; el caller decide no graficarlo).
+ */
+function buildFlowSeries(
+  transactions: Transaction[],
+  period: Period,
+  range: PeriodRange,
+): FlowSeriesPoint[] {
+  const incomeByDate = new Map<string, number>();
+  const expenseByDate = new Map<string, number>();
+  for (const t of transactions) {
+    if (t.type === 'income') {
+      incomeByDate.set(t.date, (incomeByDate.get(t.date) ?? 0) + t.amount);
+    } else if (t.type === 'expense') {
+      expenseByDate.set(t.date, (expenseByDate.get(t.date) ?? 0) + t.amount);
+    }
+  }
+
+  const WEEKDAY_INITIALS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+  const today = todayLocalISO();
+  const points: FlowSeriesPoint[] = [];
+
+  const cursor = parseLocalISODate(range.start);
+  // El período puede terminar a futuro (mes calendario completo) — cortamos en hoy.
+  const last = range.end < today ? range.end : today;
+
+  let iso = toLocalISODate(cursor);
+  while (iso <= last) {
+    let label = '';
+    if (period === 'week') label = WEEKDAY_INITIALS[cursor.getDay()];
+    else if (period === 'day') label = 'Hoy';
+    else {
+      const dayNum = cursor.getDate();
+      if (dayNum === 1 || dayNum % 5 === 0) label = String(dayNum);
+    }
+    points.push({
+      date: iso,
+      label,
+      income: incomeByDate.get(iso) ?? 0,
+      expense: expenseByDate.get(iso) ?? 0,
+      isToday: iso === today,
+    });
+    cursor.setDate(cursor.getDate() + 1);
+    iso = toLocalISODate(cursor);
+  }
+  return points;
+}
+
+/** D-2 — promedio diario de ingresos de un rango ya cargado (línea "prom"). */
+function dailyAvgIncome(transactions: Transaction[], start: string, end: string): number {
+  const total = transactions
+    .filter(t => t.type === 'income')
+    .reduce((s, t) => s + t.amount, 0);
+  if (total === 0) return 0;
+  const days =
+    Math.round(
+      (parseLocalISODate(end).getTime() - parseLocalISODate(start).getTime()) /
+        86_400_000,
+    ) + 1;
+  return days > 0 ? total / days : 0;
+}
+
 /** Calcula la meta de sub-info ("12 ventas · 30h · 3 días") para un rango ya cargado. */
 function buildMeta(
   transactions: Transaction[],
@@ -654,6 +753,9 @@ export const analyticsRepo = {
       income:  buildFlowBlock(currentTx, previousTx, 'income',  accountById, overrides),
       expense: buildFlowBlock(currentTx, previousTx, 'expense', accountById, overrides),
       prevLabel: range.prevLabel,
+      // D-2 — serie para <PeriodBars/>. Computada de las tx ya fetcheadas.
+      series: buildFlowSeries(currentTx, period, range),
+      prevDailyAvgIncome: dailyAvgIncome(previousTx, range.prevStart, range.prevEnd),
     };
   },
 
