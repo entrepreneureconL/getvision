@@ -29,7 +29,7 @@ import {
   type HeroMetricKey,
   type HeroMetricSpec,
 } from '../utils/heroMetrics';
-import { getPeriodRange, type Period } from '../utils/periods';
+import { getPeriodRange, getStockPeriodRange, type Period, type StockPeriod } from '../utils/periods';
 import {
   transactionsRepo,
   type DashboardKPIs,
@@ -39,9 +39,15 @@ import {
   type HoursSummary,
 } from './hoursLog';
 import { productsRepo } from './products';
+import { accountsRepo } from './accounts';
+import { categoriesRepo } from './categories';
+import { resolveCategory } from '../utils/transactionCategories';
+import { PENDING_KEY, UNLABELED_KEY } from '../utils/historyFilters';
 import type { Business } from '../schemas/business';
 import type { Transaction } from '../schemas/transaction';
 import type { Product } from '../schemas/product';
+import type { Account, AccountKind } from '../schemas/account';
+import type { CategoryOverride } from '../schemas/categoryOverride';
 
 // ────────────────────────────────────────────────────────────────────
 // Tipos
@@ -103,6 +109,124 @@ export type MetricResultWithPeriod = MetricResult & {
   comparison: MetricComparison | null;
   /** Contadores secundarios para sub-info. */
   meta: MetricMeta;
+};
+
+/**
+ * F1-J — Resultado del cálculo "Plata Disponible".
+ *
+ * Modelo mental:
+ *   liquidNow            → lo que YA está en mis cuentas (caja real, devengado
+ *                          al pasado: todas las transactions saldadas).
+ *   receivablesPending   → lo que está vendido pero todavía no cobrado.
+ *   payablesPending      → lo que está comprado pero todavía no pagado.
+ *   netAvailable         → escenario "si todo se cumple": liquidNow
+ *                          + receivables − payables.
+ *
+ * No confundir con `monthly_balance` (hero metric):
+ *   monthly_balance es devengado del PERÍODO (ingresos − gastos del mes).
+ *   AvailableCash es snapshot de stock al momento actual.
+ *   Uno es FLUJO, el otro es STOCK. Ambos son verdad.
+ */
+export type AccountBalance = {
+  id: string;
+  name: string;
+  kind: AccountKind;
+  balance: number;
+};
+
+export type AvailableCashResult = {
+  liquidNow: number;
+  receivablesPending: number;
+  payablesPending: number;
+  netAvailable: number;
+  byAccount: AccountBalance[];
+  pendingCount: { receivables: number; payables: number };
+};
+
+/**
+ * F1-M.2 — Resultado del cálculo "Ingresos / Costos del mes" con composición.
+ *
+ * `byChannel`  — suma por cuenta donde entró/salió la plata.
+ *                Las transactions pendientes (sin account asignada) caen en
+ *                la línea sintética con key '__pending'.
+ *
+ * `byCategory` — suma por etiqueta. Las que no tienen `category` o cuyo value
+ *                no resuelve a un CategoryDef conocido caen en key '__unlabeled'.
+ *
+ * Ambos arrays vienen ordenados por amount desc — el orden visual del bloque
+ * es directamente `arr.map(...)` sin más lógica.
+ *
+ * `percent` ∈ [0,100] del total del bloque. Si total = 0 todos vienen en 0.
+ *
+ * Los keys sintéticos PENDING_KEY / UNLABELED_KEY viven en `utils/historyFilters`
+ * para que `transactionsRepo.listForFilter` los pueda importar sin ciclo.
+ */
+
+export type FlowLine = {
+  /** Key estable para tap-to-filter (F1-M.4): accountId | category value | sentinel. */
+  key: string;
+  /** Label visible al usuario. */
+  label: string;
+  amount: number;
+  percent: number;
+};
+
+export type FlowBlock = {
+  total: number;
+  count: number;
+  byChannel: FlowLine[];
+  byCategory: FlowLine[];
+  /** F1-M Fase B — total del período inmediatamente anterior, para comparativa. */
+  previousTotal: number;
+  previousCount: number;
+};
+
+export type MonthFlowResult = {
+  income: FlowBlock;
+  expense: FlowBlock;
+  /** F1-M Fase B — label del período anterior ("ayer", "semana pasada", etc.). */
+  prevLabel: string;
+};
+
+/**
+ * F1-M Fase B (refactor B5) — Snapshot de MiPlata con variación neta del período.
+ *
+ * Tras feedback CEO 2026-06-09 la semántica del card cambió: ya no es STOCK
+ * ("cuánto tengo ahora"), pasa a ser FLOW NETO POR CUENTA del período elegido
+ * ("cuánto se movió mi plata este período"). Análogo conceptual al bloque
+ * Ingresos/Costos del mes, pero desglosado por cuenta y neto (ingresos − costos).
+ *
+ * Campos:
+ *   variation              → variación neta del período (Σ tx ingresos − Σ tx costos).
+ *   variationByAccount     → desglose por cuenta. Para chip "Mes" sería:
+ *                            Efectivo: -77.000 / MP: +240.000 / Banco: +145.000.
+ *   receivablesPending     → solo poblado cuando stockPeriod === 'today'.
+ *   payablesPending        → idem.
+ *   pendingCount           → idem.
+ *   currentLiquidNow       → saldo TOTAL ahora (stock). Sub-info de referencia,
+ *                            no protagonista — para que el usuario no pierda
+ *                            de vista cuánta plata tiene en total.
+ *   delta                  → variación actual vs variación del período anterior.
+ *                            `percent` null si la variación previa fue 0.
+ *   period / prevLabel     → eco para el UI.
+ */
+export type AccountVariation = {
+  id: string;
+  name: string;
+  kind: AccountKind;
+  variation: number;
+};
+
+export type MiPlataSnapshot = {
+  variation: number;
+  variationByAccount: AccountVariation[];
+  receivablesPending: number;
+  payablesPending: number;
+  pendingCount: { receivables: number; payables: number };
+  currentLiquidNow: number;
+  delta: { amount: number; percent: number | null };
+  period: StockPeriod;
+  prevLabel: string;
 };
 
 // Defaults para Promise.all selectivo (cuando una métrica no necesita cierto data).
@@ -310,6 +434,80 @@ function runCompute(
   }
 }
 
+/**
+ * F1-M.2 — Construye un FlowBlock (Ingresos o Costos) con ambos desgloses
+ * precomputados. Puro: recibe data ya cargada, devuelve el objeto agregado.
+ *
+ * Excluye los `_extraordinary` (igual que `aggregate` de transactionsRepo) —
+ * los aportes/retiros/transferencias del dueño no son flujo operativo del mes.
+ *
+ * Para `byChannel`:
+ *   - income  → agrupa por `to_account_id` (donde entró la plata).
+ *   - expense → agrupa por `from_account_id` (de dónde salió).
+ *   - account ids null (transactions pendientes) → key `PENDING_KEY`.
+ *
+ * Para `byCategory`:
+ *   - agrupa por `category` raw (snake_case del catálogo o de un override).
+ *   - `category` null o no resuelta → key `UNLABELED_KEY`.
+ */
+function buildFlowBlock(
+  all: Transaction[],
+  previous: Transaction[],
+  kind: 'income' | 'expense',
+  accountById: Map<string, Account>,
+  overrides: CategoryOverride[],
+): FlowBlock {
+  const filtered = all.filter(t => t.type === kind);
+  const total = filtered.reduce((s, t) => s + t.amount, 0);
+  const count = filtered.length;
+
+  // F1-M Fase B — totales del período anterior para la comparativa.
+  // No necesitamos composición histórica — solo el total agregado.
+  const previousFiltered = previous.filter(t => t.type === kind);
+  const previousTotal = previousFiltered.reduce((s, t) => s + t.amount, 0);
+  const previousCount = previousFiltered.length;
+
+  const channelMap = new Map<string, number>();
+  const categoryMap = new Map<string, number>();
+
+  for (const t of filtered) {
+    // ── byChannel ──
+    const accountId = kind === 'income' ? t.to_account_id : t.from_account_id;
+    const channelKey = accountId ?? PENDING_KEY;
+    channelMap.set(channelKey, (channelMap.get(channelKey) ?? 0) + t.amount);
+
+    // ── byCategory ──
+    const categoryKey = t.category && t.category.length > 0 ? t.category : UNLABELED_KEY;
+    categoryMap.set(categoryKey, (categoryMap.get(categoryKey) ?? 0) + t.amount);
+  }
+
+  const pendingLabel = kind === 'income' ? 'Pendiente cobro' : 'Pendiente pago';
+
+  const byChannel: FlowLine[] = [...channelMap.entries()]
+    .map(([key, amount]) => ({
+      key,
+      label: key === PENDING_KEY
+        ? pendingLabel
+        : accountById.get(key)?.name ?? 'Cuenta archivada',
+      amount,
+      percent: total > 0 ? (amount / total) * 100 : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  const byCategory: FlowLine[] = [...categoryMap.entries()]
+    .map(([key, amount]) => ({
+      key,
+      label: key === UNLABELED_KEY
+        ? 'Sin etiqueta'
+        : resolveCategory(key, overrides)?.label ?? key,
+      amount,
+      percent: total > 0 ? (amount / total) * 100 : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  return { total, count, byChannel, byCategory, previousTotal, previousCount };
+}
+
 /** Calcula la meta de sub-info ("12 ventas · 30h · 3 días") para un rango ya cargado. */
 function buildMeta(
   transactions: Transaction[],
@@ -422,6 +620,155 @@ export const analyticsRepo = {
       previousLabel: range.prevLabel,
       comparison,
       meta,
+    };
+  },
+
+  /**
+   * F1-M.2 — Cómputo del "Flow del período" (Ingresos + Costos) con composición
+   * por canal Y por etiqueta lista para el toggle del MonthFlowCard.
+   *
+   * F1-M Fase B — ahora carga también el período anterior para que MonthFlowCard
+   * pueda renderizar la línea de comparativa "↑ +$X vs prevLabel" debajo del
+   * total. Solo sumas (no composición previa) — el delta es agregado, no por canal.
+   *
+   * Cost: 4 round-trips paralelos a Supabase (current tx + previous tx + accounts
+   * + overrides). Los dos ejes de composición se agregan en una sola pasada por
+   * transaction (O(n)).
+   */
+  async getMonthFlow(
+    businessId: string,
+    period: Period,
+  ): Promise<MonthFlowResult> {
+    const range = getPeriodRange(period);
+
+    const [currentTx, previousTx, accounts, overrides] = await Promise.all([
+      transactionsRepo.listForFlowByRange(businessId, range.start, range.end),
+      transactionsRepo.listForFlowByRange(businessId, range.prevStart, range.prevEnd),
+      accountsRepo.listActive(businessId),
+      categoriesRepo.listForBusiness(businessId),
+    ]);
+
+    const accountById = new Map<string, Account>(accounts.map(a => [a.id, a]));
+
+    return {
+      income:  buildFlowBlock(currentTx, previousTx, 'income',  accountById, overrides),
+      expense: buildFlowBlock(currentTx, previousTx, 'expense', accountById, overrides),
+      prevLabel: range.prevLabel,
+    };
+  },
+
+  /**
+   * F1-J — "Plata Disponible". Calcula el snapshot de stock del business:
+   * cuánta plata real hay hoy en las cuentas + lo que falta cobrar − lo que
+   * falta pagar. Es el feed del card superior de HeroDualCard (F1-J.5).
+   *
+   * F1-M Fase B — acepta `asOf` opcional. Cuando se pasa, calcula balances
+   * históricos al cierre de esa fecha (vía `accountsRepo.getBalances(asOf)`)
+   * y NO incluye pendientes: los pending son una proyección STOCK del presente
+   * (lo que cobrarías a futuro) — no aplica a un snapshot del pasado.
+   *   - sin asOf  → liquidNow + pendientes + neto proyectado.
+   *   - con asOf  → solo liquidNow histórico + byAccount; pending arrays vacíos.
+   *
+   * Costo: 2-3 round-trips a Supabase (accounts list, balances, pending si aplica).
+   */
+  async getAvailableCash(businessId: string, asOf?: string): Promise<AvailableCashResult> {
+    const accounts = await accountsRepo.listActive(businessId);
+
+    const [balances, pending] = await Promise.all([
+      accountsRepo.getBalances(businessId, asOf),
+      asOf
+        ? Promise.resolve({ receivables: [], payables: [] })
+        : transactionsRepo.listPending(businessId),
+    ]);
+
+    const byAccount: AccountBalance[] = accounts.map(a => ({
+      id: a.id,
+      name: a.name,
+      kind: a.kind,
+      balance: balances[a.id] ?? a.initial_balance,
+    }));
+
+    const liquidNow = byAccount.reduce((sum, a) => sum + a.balance, 0);
+    const receivablesPending = pending.receivables.reduce((s, t) => s + t.amount, 0);
+    const payablesPending = pending.payables.reduce((s, t) => s + t.amount, 0);
+    const netAvailable = liquidNow + receivablesPending - payablesPending;
+
+    return {
+      liquidNow,
+      receivablesPending,
+      payablesPending,
+      netAvailable,
+      byAccount,
+      pendingCount: {
+        receivables: pending.receivables.length,
+        payables: pending.payables.length,
+      },
+    };
+  },
+
+  /**
+   * F1-M Fase B (refactor B5) — Variación neta de MiPlata para el período.
+   *
+   * Devuelve la variación TOTAL + por cuenta del rango elegido + comparativa
+   * vs el mismo rango del período anterior. Para chip 'today' también incluye
+   * pendientes (proyección futura desde el presente). `currentLiquidNow` viaja
+   * como sub-info para que el usuario no pierda de vista el saldo stock total.
+   *
+   * Costo: 4 round-trips paralelos a Supabase (accounts list, current variations,
+   * previous variations, pending si aplica, current balances para liquidNow).
+   */
+  async getMiPlataSnapshot(
+    businessId: string,
+    stockPeriod: StockPeriod,
+  ): Promise<MiPlataSnapshot> {
+    const range = getStockPeriodRange(stockPeriod);
+
+    const [accounts, currentVar, previousVar, balances, pending] = await Promise.all([
+      accountsRepo.listActive(businessId),
+      accountsRepo.getVariations(businessId, range.start, range.end),
+      accountsRepo.getVariations(businessId, range.prevStart, range.prevEnd),
+      accountsRepo.getBalances(businessId),
+      stockPeriod === 'today'
+        ? transactionsRepo.listPending(businessId)
+        : Promise.resolve({ receivables: [], payables: [] }),
+    ]);
+
+    const variationByAccount: AccountVariation[] = accounts.map(a => ({
+      id: a.id,
+      name: a.name,
+      kind: a.kind,
+      variation: currentVar[a.id] ?? 0,
+    }));
+
+    const variation = variationByAccount.reduce((s, a) => s + a.variation, 0);
+    const previousVariation = Object.values(previousVar).reduce((s, v) => s + v, 0);
+
+    const currentLiquidNow = accounts.reduce(
+      (s, a) => s + (balances[a.id] ?? a.initial_balance),
+      0,
+    );
+
+    const receivablesPending = pending.receivables.reduce((s, t) => s + t.amount, 0);
+    const payablesPending = pending.payables.reduce((s, t) => s + t.amount, 0);
+
+    const deltaAmount = variation - previousVariation;
+    const deltaPercent = previousVariation !== 0
+      ? (deltaAmount / Math.abs(previousVariation)) * 100
+      : null;
+
+    return {
+      variation,
+      variationByAccount,
+      receivablesPending,
+      payablesPending,
+      pendingCount: {
+        receivables: pending.receivables.length,
+        payables: pending.payables.length,
+      },
+      currentLiquidNow,
+      delta: { amount: deltaAmount, percent: deltaPercent },
+      period: stockPeriod,
+      prevLabel: range.prevLabel,
     };
   },
 };

@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView, Platform, ActivityIndicator, Switch,
 } from 'react-native';
 import { hoursLogRepo } from '../repos/hoursLog';
+import { todayLocalISO } from '../utils/periods';
 
 type Props = {
   businessId: string;
@@ -19,10 +20,8 @@ type Props = {
   onSuccess: () => void;
 };
 
-const todayISO = () => new Date().toISOString().split('T')[0];
-
 export default function QuickHoursForm({ businessId, visible, onClose, onSuccess }: Props) {
-  const [date, setDate]         = useState(todayISO());
+  const [date, setDate]         = useState(todayLocalISO());
   const [hours, setHours]       = useState('');
   const [rate, setRate]         = useState('');
   const [desc, setDesc]         = useState('');
@@ -31,7 +30,7 @@ export default function QuickHoursForm({ businessId, visible, onClose, onSuccess
   const [error, setError]       = useState('');
 
   const reset = () => {
-    setDate(todayISO()); setHours(''); setRate(''); setDesc('');
+    setDate(todayLocalISO()); setHours(''); setRate(''); setDesc('');
     setBillable(true); setError('');
   };
 

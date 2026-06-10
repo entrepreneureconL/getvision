@@ -1,3 +1,7 @@
+import type { PaymentMethod } from '../schemas/transaction';
+import type { AccountKind } from '../schemas/account';
+import type { CategoryOverride } from '../schemas/categoryOverride';
+
 /**
  * transactionCategories.ts — catálogo de categorías y métodos de pago.
  *
@@ -64,10 +68,35 @@ export const EXTRAORDINARY_CATEGORIES: CategoryDef[] = [
   { value: 'extra_expense', label: 'Gasto extraordinario',   icon: '⚠️', tint: 'danger',  type: 'expense' },
 ];
 
+/**
+ * F1-J — Subtipos de "Movement" (aportes/retiros del dueño + transferencias
+ * entre cuentas propias). Antes el MovementForm guardaba todo como categoría
+ * libre "Ingreso extraordinario" / "Gasto extraordinario" — los subtipos
+ * permiten distinguir en reportes y excluirlos correctamente del cómputo de
+ * ganancia operativa (los aportes no son ingreso real; las transferencias no
+ * son ni ingreso ni gasto, solo mueven plata).
+ *
+ * Convención:
+ *   - owner_in/out → afecta el patrimonio (no entra al resultado del mes).
+ *     Fila única con to_account_id (aporte) o from_account_id (retiro).
+ *   - transfer    → mueve plata entre cuentas propias (cero efecto en P&L).
+ *     Una sola fila con from_account_id + to_account_id seteados en simultáneo.
+ *     `accountsRepo.getBalances` resta del from y suma al to, conservando la
+ *     identidad contable. Atómico, sin riesgo de dejar mitades sueltas.
+ *
+ * MovementForm (F1-J.5c) usa estos values directamente como tabs.
+ */
+export const MOVEMENT_CATEGORIES: CategoryDef[] = [
+  { value: 'owner_in',  label: 'Aporte del dueño',        icon: '➕', tint: 'success', type: 'income' },
+  { value: 'owner_out', label: 'Retiro del dueño',        icon: '➖', tint: 'danger',  type: 'expense' },
+  { value: 'transfer', label: 'Transferencia entre cuentas', icon: '🔁', tint: 'info',  type: 'income' },
+];
+
 const ALL_CATEGORIES = [
   ...INCOME_CATEGORIES,
   ...EXPENSE_CATEGORIES,
   ...EXTRAORDINARY_CATEGORIES,
+  ...MOVEMENT_CATEGORIES,
 ];
 
 /**
@@ -103,11 +132,40 @@ const LEGACY_MAP: Record<string, string> = {
 };
 
 /**
+ * F1-L: helper interno para convertir un CategoryOverride en CategoryDef.
+ * Los enums (tint/type) son estructuralmente iguales — solo cambio de label.
+ */
+function overrideToDef(o: CategoryOverride): CategoryDef {
+  return {
+    value: o.value,
+    label: o.label,
+    icon: o.icon,
+    tint: o.tint as CategoryTint,
+    type: o.type as CategoryType,
+  };
+}
+
+/**
  * Devuelve la definición de categoría para un raw string (nuevo o legacy).
  * `null` si no hay match.
+ *
+ * F1-L: ahora acepta overrides per business. Prioridad:
+ *   1. Override custom activo (is_archived=false) con value matchea.
+ *   2. Default exacto en ALL_CATEGORIES.
+ *   3. Match vía LEGACY_MAP a un default.
  */
-export function resolveCategory(raw: string | null | undefined): CategoryDef | null {
+export function resolveCategory(
+  raw: string | null | undefined,
+  overrides: CategoryOverride[] = [],
+): CategoryDef | null {
   if (!raw) return null;
+
+  // F1-L: prioridad a customs (incluso archivados — para preservar el label
+  // histórico en transactions guardadas con una custom que luego se archivó).
+  // El archive solo afecta al picker (getCategoriesForType), no al display.
+  const override = overrides.find(o => o.value === raw);
+  if (override) return overrideToDef(override);
+
   // Match directo (valor nuevo)
   const direct = ALL_CATEGORIES.find(c => c.value === raw);
   if (direct) return direct;
@@ -119,9 +177,37 @@ export function resolveCategory(raw: string | null | undefined): CategoryDef | n
   return null;
 }
 
-/** Devuelve las categorías ofrecibles en un form de income o expense. */
-export function getCategoriesForType(type: CategoryType): CategoryDef[] {
-  return type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+/**
+ * Devuelve las categorías ofrecibles en un form de income o expense.
+ *
+ * F1-L: compone (a) defaults menos los archivados + (b) customs no-archivados.
+ *
+ * Si no se pasan overrides, devuelve solo defaults (backwards-compat con todo
+ * el código que llamaba sin segundo argumento).
+ */
+export function getCategoriesForType(
+  type: CategoryType,
+  overrides: CategoryOverride[] = [],
+): CategoryDef[] {
+  const defaults = type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+
+  // Defaults archivados por este business (override is_archived=true que matchea).
+  const archivedValues = new Set(
+    overrides
+      .filter(o => o.is_archived && o.type === type)
+      .map(o => o.value),
+  );
+
+  // Customs nuevos (value libre, NO matchea un default, is_archived=false).
+  const defaultValues = new Set(defaults.map(d => d.value));
+  const customs: CategoryDef[] = overrides
+    .filter(o => !o.is_archived && o.type === type && !defaultValues.has(o.value))
+    .map(overrideToDef);
+
+  return [
+    ...defaults.filter(d => !archivedValues.has(d.value)),
+    ...customs,
+  ];
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -129,7 +215,8 @@ export function getCategoriesForType(type: CategoryType): CategoryDef[] {
 // ────────────────────────────────────────────────────────────────────
 
 export type PaymentMethodDef = {
-  value: string;
+  /** Coincide con PaymentMethodEnum del schema → tipado estricto. */
+  value: PaymentMethod;
   label: string;
   icon: string;
   /** Texto cortito para el chip en la lista ("Efectivo" → "Efec."). */
@@ -150,4 +237,162 @@ export function resolvePaymentMethod(
 ): PaymentMethodDef | null {
   if (!raw) return null;
   return PAYMENT_METHODS.find(m => m.value === raw) ?? null;
+}
+
+/**
+ * F1-K.1 (ADR #22): derivar `payment_method` desde el kind de la cuenta
+ * seleccionada. Reemplaza el picker manual de "Forma de cobro/pago" que era
+ * redundante con el selector de cuenta.
+ *
+ *   cash    → cash
+ *   mp      → digital
+ *   wallet  → digital
+ *   bank    → transfer  (default; en F2 se reintroduce sub-selector aquí si
+ *                        hace falta distinguir transferencia vs tarjeta para
+ *                        reconciliación bancaria)
+ *   other   → cash      (fallback conservador)
+ *
+ * Si en el futuro hay accounts customs con kind='other', el derived 'cash'
+ * es solo un valor por defecto — el usuario puede igual editar la transaction
+ * y cambiar el método manualmente desde el editor (cuando F2 lo introduzca).
+ */
+export function paymentMethodFromAccountKind(kind: AccountKind): PaymentMethod {
+  switch (kind) {
+    case 'cash':   return 'cash';
+    case 'mp':     return 'digital';
+    case 'wallet': return 'digital';
+    case 'bank':   return 'transfer';
+    case 'other':  return 'cash';
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// SUGERENCIAS POR RUBRO — F1-L.5
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Definición de una sugerencia. Mismo shape que CategoryDef salvo que no es
+ * obligatorio que el usuario la cree — son chips tap-to-create en el modal
+ * AddCategoryModal y en el editor de Settings.
+ *
+ * El `value` debe ser snake_case (mismo patrón que defaults) — al crearse
+ * como override, ese value se guarda en `category_overrides.value` y en
+ * `transactions.category`. Si ya existe una sugerencia con ese value como
+ * default (mismo slug), `getSuggestedCategoriesForRubro` la filtra para
+ * no duplicar.
+ *
+ * Filosofía:
+ *   - 4 rubros pivote en esta primera vuelta (los más comunes en F0/F1
+ *     según uso real esperado): Gastronomía, Belleza y Estética,
+ *     Alimentos y Bebidas (kioscos/almacenes), Asesoramiento Profesional.
+ *   - 4-8 sugerencias por (rubro, type). Más chips abruman el picker.
+ *   - Habla el vocabulario del usuario tradicional (ADR §12.3 "Tradicional
+ *     establecido"). NO genéricas — para genéricas ya están los defaults.
+ *   - Iterar con feedback beta. El mapa es 100% editable sin migration.
+ */
+export type SuggestedCategoryDef = {
+  value: string;
+  label: string;
+  icon: string;
+  tint: CategoryTint;
+  type: CategoryType;
+};
+
+/**
+ * Mapa rubro → sugerencias. La key debe coincidir EXACTAMENTE con el `rubro`
+ * guardado en `businesses.rubro` (case-sensitive). Ver `businessProfile.ts`
+ * para la lista canónica.
+ */
+export const SUGGESTED_CATEGORIES_BY_RUBRO: Record<string, SuggestedCategoryDef[]> = {
+  // ───── Gastronomía (commerce) ─────
+  'Gastronomía': [
+    // Income
+    { value: 'menu_principal', label: 'Menú principal',     icon: '🍽️', tint: 'success', type: 'income' },
+    { value: 'delivery_venta', label: 'Delivery',            icon: '🛵', tint: 'success', type: 'income' },
+    { value: 'take_away',      label: 'Para llevar',         icon: '📦', tint: 'success', type: 'income' },
+    { value: 'bebidas_venta',  label: 'Bebidas y vinos',     icon: '🥂', tint: 'success', type: 'income' },
+    { value: 'evento_catering', label: 'Evento / Catering',  icon: '🎉', tint: 'info',    type: 'income' },
+    // Expense
+    { value: 'mercaderia_perecedera', label: 'Mercadería fresca', icon: '🥬', tint: 'warning', type: 'expense' },
+    { value: 'bebidas_compra',        label: 'Compra de bebidas', icon: '🍷', tint: 'warning', type: 'expense' },
+    { value: 'gas_cocina',            label: 'Gas / Cocina',       icon: '🔥', tint: 'warning', type: 'expense' },
+    { value: 'comision_delivery',     label: 'Comisión apps delivery', icon: '🛵', tint: 'warning', type: 'expense' },
+    { value: 'descartables',          label: 'Descartables / Packaging', icon: '🥡', tint: 'warning', type: 'expense' },
+  ],
+
+  // ───── Belleza y Estética (commerce) ─────
+  'Belleza y Estética': [
+    // Income
+    { value: 'corte',             label: 'Corte de pelo',           icon: '💇', tint: 'success', type: 'income' },
+    { value: 'color_tintura',     label: 'Color / Tintura',         icon: '🎨', tint: 'success', type: 'income' },
+    { value: 'tratamiento',       label: 'Tratamiento capilar',     icon: '💆', tint: 'success', type: 'income' },
+    { value: 'manicura_pedicura', label: 'Manicura / Pedicura',     icon: '💅', tint: 'success', type: 'income' },
+    { value: 'venta_productos',   label: 'Venta de productos',      icon: '🧴', tint: 'success', type: 'income' },
+    // Expense
+    { value: 'productos_quimicos', label: 'Productos / Tinturas',   icon: '🧪', tint: 'warning', type: 'expense' },
+    { value: 'herramientas_corte', label: 'Herramientas / Tijeras', icon: '✂️', tint: 'warning', type: 'expense' },
+    { value: 'alquiler_sillon',    label: 'Alquiler de sillón',     icon: '💺', tint: 'warning', type: 'expense' },
+    { value: 'lavanderia',         label: 'Lavandería / Toallas',   icon: '🧺', tint: 'warning', type: 'expense' },
+  ],
+
+  // ───── Alimentos y Bebidas (kioscos, almacenes) ─────
+  'Alimentos y Bebidas': [
+    // Income
+    { value: 'cigarrillos',  label: 'Cigarrillos',          icon: '🚬', tint: 'success', type: 'income' },
+    { value: 'bebidas_venta', label: 'Bebidas',             icon: '🥤', tint: 'success', type: 'income' },
+    { value: 'golosinas',    label: 'Golosinas y snacks',    icon: '🍬', tint: 'success', type: 'income' },
+    { value: 'panificados',  label: 'Pan / Facturas',        icon: '🥖', tint: 'success', type: 'income' },
+    { value: 'almacen_gral', label: 'Almacén general',       icon: '🛒', tint: 'success', type: 'income' },
+    // Expense
+    { value: 'mercaderia_seca',    label: 'Mercadería seca',         icon: '📦', tint: 'warning', type: 'expense' },
+    { value: 'bebidas_compra',     label: 'Compra de bebidas',       icon: '🥤', tint: 'warning', type: 'expense' },
+    { value: 'cigarrillos_compra', label: 'Compra de cigarrillos',   icon: '🚬', tint: 'warning', type: 'expense' },
+    { value: 'flete_proveedor',    label: 'Flete de proveedor',      icon: '🚛', tint: 'warning', type: 'expense' },
+    { value: 'rotura_vencido',     label: 'Rotura / Vencidos',       icon: '❌', tint: 'danger',  type: 'expense' },
+  ],
+
+  // ───── Asesoramiento Profesional (services) ─────
+  'Asesoramiento Profesional': [
+    // Income
+    { value: 'hora_consulta',  label: 'Hora de consulta',     icon: '🕐', tint: 'success', type: 'income' },
+    { value: 'retainer',       label: 'Retainer mensual',     icon: '📅', tint: 'info',    type: 'income' },
+    { value: 'proyecto',       label: 'Proyecto cerrado',     icon: '📑', tint: 'success', type: 'income' },
+    { value: 'dictamen',       label: 'Dictamen / Informe',   icon: '📋', tint: 'success', type: 'income' },
+    // Expense
+    { value: 'colegio_profesional', label: 'Cuota colegio profesional', icon: '🎓', tint: 'warning', type: 'expense' },
+    { value: 'software_pro',        label: 'Software profesional',      icon: '💻', tint: 'warning', type: 'expense' },
+    { value: 'capacitacion',        label: 'Capacitación / Cursos',     icon: '📚', tint: 'warning', type: 'expense' },
+    { value: 'oficina_coworking',   label: 'Oficina / Coworking',       icon: '🏢', tint: 'warning', type: 'expense' },
+  ],
+};
+
+/**
+ * Devuelve las sugerencias relevantes para (rubro, type), filtrando:
+ *   1. Las que ya son default activo en el catálogo (no duplicar el picker).
+ *   2. Las que ya fueron creadas por este business (override custom).
+ *   3. Las que ya fueron archivadas explícitamente (respeta la decisión).
+ *
+ * Si el rubro no está mapeado o es `null`, devuelve [] (graceful degradation).
+ * La UI debe esconder la sección "Sugerencias para tu rubro" cuando este
+ * helper devuelve vacío.
+ */
+export function getSuggestedCategoriesForRubro(
+  rubro: string | null | undefined,
+  type: CategoryType,
+  overrides: CategoryOverride[] = [],
+): SuggestedCategoryDef[] {
+  if (!rubro) return [];
+  const suggestions = SUGGESTED_CATEGORIES_BY_RUBRO[rubro];
+  if (!suggestions) return [];
+
+  const defaultValues = new Set(
+    (type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(c => c.value),
+  );
+  const overrideValues = new Set(overrides.map(o => o.value));
+
+  return suggestions.filter(s =>
+    s.type === type &&
+    !defaultValues.has(s.value) &&
+    !overrideValues.has(s.value),
+  );
 }

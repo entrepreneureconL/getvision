@@ -1,16 +1,23 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
-  StyleSheet, Text, View, TextInput, TouchableOpacity, Alert,
+  StyleSheet, Text, View, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, Dimensions
 } from 'react-native';
+import { confirmDestructive } from '../utils/confirm';
 import { supabase } from '../lib/supabase';
 import {
   getCategoriesForType,
-  PAYMENT_METHODS as PM_CATALOG,
+  paymentMethodFromAccountKind,
   resolveCategory,
 } from '../utils/transactionCategories';
+import { todayLocalISO } from '../utils/periods';
 import { transactionsRepo } from '../repos/transactions';
+import { accountsRepo } from '../repos/accounts';
+import { categoriesRepo } from '../repos/categories';
+import AddCategoryModal from './AddCategoryModal';
 import type { Transaction } from '../schemas/transaction';
+import type { Account } from '../schemas/account';
+import type { CategoryOverride } from '../schemas/categoryOverride';
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#2E86C1';
@@ -21,63 +28,118 @@ type Props = {
   onClose: () => void;
   /** Si está presente, el form trabaja en modo edición. F1-D Task #11. */
   transaction?: Transaction;
+  /** F1-L.5: rubro del business para sugerencias contextuales en AddCategoryModal. */
+  rubro?: string | null;
 };
 
-// F1-D: subset del catálogo central de payment methods.
-// Mantenemos solo los relevantes para ventas (no incluimos 'digital' separado
-// para no inflar el form; el form puede sumarlo en otra iteración).
-const PAYMENT_METHODS = PM_CATALOG
-  .filter(m => ['cash', 'transfer', 'credit', 'pending'].includes(m.value))
-  .map(m => ({
-    key: m.value,
-    label: `${m.icon} ${m.value === 'pending' ? 'A cobrar' : m.label}`,
-  }));
+// F1-K.1 (ADR #22): el picker de "Forma de cobro" se eliminó. payment_method
+// ahora se deriva del kind de la cuenta seleccionada al guardar — la cuenta
+// ya contiene esa información.
+// F1-L: las categorías ya NO se computan a module-level; se componen dentro
+// del componente con los overrides del business (defaults + custom − archived).
 
-const CATEGORIES = getCategoriesForType('income');
-
-export default function SaleForm({ businessId, onSuccess, onClose, transaction }: Props) {
+export default function SaleForm({ businessId, onSuccess, onClose, transaction, rubro }: Props) {
   const isEdit = !!transaction;
 
-  // Pre-cargado en modo edit. resolveCategory mapea legacy strings a values nuevos.
+  // F1-L: si transaction.category resuelve a un default (vía LEGACY_MAP o match
+  // directo), usamos el value mapeado. Si no resuelve, lo dejamos como string
+  // crudo — una vez carguen los overrides del business, el chip va a matchear
+  // contra una custom existente. Default genérico 'product' para new.
   const initialCategory = transaction?.category
-    ? (resolveCategory(transaction.category)?.value ?? CATEGORIES[0]?.value ?? 'product')
-    : (CATEGORIES[0]?.value ?? 'product');
+    ? (resolveCategory(transaction.category)?.value ?? transaction.category)
+    : 'product';
+
+  // F1-L: overrides del business (customs + archives). Se cargan junto a accounts.
+  // Drive del picker via useMemo abajo.
+  const [overrides, setOverrides] = useState<CategoryOverride[]>([]);
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const categories = useMemo(
+    () => getCategoriesForType('income', overrides),
+    [overrides],
+  );
+
+  // F1-J.5b: estado de stock/flujo separado del payment_method.
+  //   isSettled  → true si "ya cobré" (settled_at != null en DB).
+  //   accountId  → cuenta destino cuando isSettled = true (to_account_id).
+  // Default para new: isSettled=true (caso típico — la mayoría cobra al momento).
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [isSettled, setIsSettled] = useState<boolean>(
+    isEdit ? transaction!.settled_at != null : true
+  );
+  const [accountId, setAccountId] = useState<string | null>(
+    transaction?.to_account_id ?? null
+  );
 
   const [amount, setAmount] = useState(
     transaction ? String(transaction.amount).replace('.', ',') : '',
   );
   const [description, setDescription] = useState(transaction?.description ?? '');
-  const [paymentMethod, setPaymentMethod] = useState(transaction?.payment_method ?? 'cash');
   const [category, setCategory] = useState<string>(initialCategory);
   const [date, setDate] = useState(
-    transaction?.date ?? new Date().toISOString().split('T')[0],
+    transaction?.date ?? todayLocalISO(),
   );
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
 
+  /** F1-J/L: cargar cuentas + overrides en paralelo al montar. */
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const [accs, ovs] = await Promise.all([
+        accountsRepo.listActive(businessId),
+        categoriesRepo.listForBusiness(businessId),
+      ]);
+      if (!active) return;
+      setAccounts(accs);
+      setOverrides(ovs);
+      if (!accountId) {
+        const def = accs.find(a => a.is_default) ?? accs[0];
+        if (def) setAccountId(def.id);
+      }
+    })();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessId]);
+
   const amountNumber = parseFloat(amount.replace(',', '.'));
-  const canSubmit = !isNaN(amountNumber) && amountNumber > 0 && !loading;
+  // Validación F1-J.5b: si "ya cobré" pero no hay cuenta elegida, bloqueamos.
+  // Si "pendiente", la cuenta no es requerida.
+  const canSubmit = !isNaN(amountNumber)
+    && amountNumber > 0
+    && !loading
+    && (!isSettled || accountId != null);
 
   const handleSave = async () => {
     if (!canSubmit) return;
     setLoading(true);
     setError('');
 
+    // Derivados F1-J: cuando no está saldado, todo lo de stock va null.
+    // F1-K.1: payment_method se deriva del kind de la cuenta destino.
+    const settledAt = isSettled ? date : null;
+    const toAccountId = isSettled ? accountId : null;
+    const selectedAccount = isSettled && accountId
+      ? accounts.find(a => a.id === accountId)
+      : null;
+    const finalPaymentMethod = selectedAccount
+      ? paymentMethodFromAccountKind(selectedAccount.kind)
+      : null;
+
     try {
       if (isEdit && transaction) {
-        // UPDATE
         const ok = await transactionsRepo.update(transaction.id, {
           amount: amountNumber,
           date,
-          payment_method: paymentMethod,
+          payment_method: finalPaymentMethod,
           category,
           description: description || null,
-          status: paymentMethod === 'pending' ? 'pending' : 'completed',
+          status: isSettled ? 'completed' : 'pending', // mirror legacy
+          settled_at: settledAt,
+          to_account_id: toAccountId,
         });
         if (!ok) throw new Error('No se pudo actualizar la venta.');
       } else {
-        // INSERT
         const { error: insertError } = await supabase
           .from('transactions')
           .insert({
@@ -85,10 +147,12 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction }
             type: 'income',
             amount: amountNumber,
             date,
-            payment_method: paymentMethod,
+            payment_method: finalPaymentMethod,
             category,
             description: description || null,
-            status: paymentMethod === 'pending' ? 'pending' : 'completed',
+            status: isSettled ? 'completed' : 'pending',
+            settled_at: settledAt,
+            to_account_id: toAccountId,
           });
         if (insertError) throw insertError;
       }
@@ -100,28 +164,21 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction }
     }
   };
 
-  /** Eliminar — solo en modo edit. Pide confirmación nativa antes de borrar. */
+  /** Eliminar — solo en modo edit. Pide confirmación cross-platform antes de borrar. */
   const handleDelete = () => {
     if (!isEdit || !transaction) return;
-    Alert.alert(
-      '¿Eliminar esta venta?',
-      'Esta acción no se puede deshacer.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            setDeleting(true);
-            setError('');
-            const ok = await transactionsRepo.remove(transaction.id);
-            setDeleting(false);
-            if (ok) onSuccess();
-            else setError('No se pudo eliminar la venta.');
-          },
-        },
-      ],
-    );
+    confirmDestructive({
+      title: '¿Eliminar esta venta?',
+      message: 'Esta acción no se puede deshacer.',
+      onConfirm: async () => {
+        setDeleting(true);
+        setError('');
+        const ok = await transactionsRepo.remove(transaction.id);
+        setDeleting(false);
+        if (ok) onSuccess();
+        else setError('No se pudo eliminar la venta.');
+      },
+    });
   };
 
   return (
@@ -153,7 +210,7 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction }
 
           <Text style={styles.label}>Tipo de venta</Text>
           <View style={styles.chipsRow}>
-            {CATEGORIES.map(cat => (
+            {categories.map(cat => (
               <TouchableOpacity
                 key={cat.value}
                 style={[styles.chip, category === cat.value && styles.chipActive]}
@@ -164,23 +221,65 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction }
                 </Text>
               </TouchableOpacity>
             ))}
+            {/* F1-L: + Nueva — abre AddCategoryModal */}
+            <TouchableOpacity
+              style={[styles.chip, styles.chipAdd]}
+              onPress={() => setShowAddCategory(true)}
+            >
+              <Text style={[styles.chipText, styles.chipAddText]}>+ Nueva</Text>
+            </TouchableOpacity>
           </View>
 
-          <Text style={styles.label}>Forma de cobro</Text>
+          {/* F1-J.5b: estado del cobro */}
+          <Text style={styles.label}>Estado del cobro</Text>
           <View style={styles.chipsRow}>
-            {PAYMENT_METHODS.map(pm => (
-              <TouchableOpacity
-                key={pm.key}
-                style={[styles.chip, paymentMethod === pm.key && styles.chipActiveGreen]}
-                onPress={() => setPaymentMethod(pm.key)}
-              >
-                <Text style={[styles.chipText,
-                  paymentMethod === pm.key && styles.chipTextActive]}>
-                  {pm.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <TouchableOpacity
+              style={[styles.chip, isSettled && styles.chipActiveGreen]}
+              onPress={() => setIsSettled(true)}
+            >
+              <Text style={[styles.chipText, isSettled && styles.chipTextActive]}>
+                ✓ Ya cobré
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.chip, !isSettled && styles.chipActivePending]}
+              onPress={() => setIsSettled(false)}
+            >
+              <Text style={[styles.chipText, !isSettled && styles.chipTextActive]}>
+                ⏳ Pendiente
+              </Text>
+            </TouchableOpacity>
           </View>
+
+          {/* F1-K.1: solo cuenta destino — payment_method se deriva del kind. */}
+          {isSettled && accounts.length > 0 && (
+            <>
+              <Text style={styles.label}>¿Dónde entró la plata?</Text>
+              <View style={styles.chipsRow}>
+                {accounts.map(a => (
+                  <TouchableOpacity
+                    key={a.id}
+                    style={[styles.chip, accountId === a.id && styles.chipActiveGreen]}
+                    onPress={() => setAccountId(a.id)}
+                  >
+                    <Text style={[styles.chipText, accountId === a.id && styles.chipTextActive]}>
+                      {a.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* F1-J.5b: ayuda contextual cuando "pendiente" */}
+          {!isSettled && (
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>
+                ⏳ Esta venta queda en "Por cobrar". Vas a poder marcarla como cobrada
+                cuando entre la plata, eligiendo en qué cuenta.
+              </Text>
+            </View>
+          )}
 
           <Text style={styles.label}>Fecha</Text>
           <TextInput
@@ -237,6 +336,20 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction }
 
         </ScrollView>
       </View>
+
+      {/* F1-L: modal de creación de categoría custom. zIndex 200 (encima del form). */}
+      <AddCategoryModal
+        visible={showAddCategory}
+        businessId={businessId}
+        type="income"
+        rubro={rubro}
+        existingOverrides={overrides}
+        onClose={() => setShowAddCategory(false)}
+        onCreated={(created) => {
+          setOverrides(prev => [...prev, created]);
+          setCategory(created.value);
+        }}
+      />
     </View>
   );
 }
@@ -284,6 +397,11 @@ const styles = StyleSheet.create({
   },
   chipActive: { backgroundColor: '#1A1A2E', borderColor: ACCENT },
   chipActiveGreen: { backgroundColor: '#0D2B1A', borderColor: '#1A6B3A' },
+  /** F1-J.5b: estado "pendiente" — amarillo/ámbar para diferenciar del cobrado. */
+  chipActivePending: { backgroundColor: '#2B2200', borderColor: '#A67800' },
+  /** F1-L: chip "+ Nueva categoría" — borde dashed teal, distinto del seleccionable. */
+  chipAdd: { borderColor: '#1F8579', borderStyle: 'dashed' },
+  chipAddText: { color: '#1F8579' },
   chipText: { color: '#7F8C8D', fontSize: 13 },
   chipTextActive: { color: '#FFFFFF' },
   errorBox: {
@@ -291,6 +409,12 @@ const styles = StyleSheet.create({
     borderRadius: 8, padding: 12, marginTop: 16,
   },
   errorText: { color: '#E74C3C', fontSize: 13 },
+  /** F1-J.5b: caja de ayuda contextual cuando el cobro queda pendiente. */
+  infoBox: {
+    backgroundColor: '#1A1500', borderWidth: 1, borderColor: '#3A2E00',
+    borderRadius: 10, padding: 12, marginTop: 12,
+  },
+  infoText: { color: '#D6BF66', fontSize: 12, lineHeight: 17 },
   saveBtn: {
     backgroundColor: '#1A6B3A', paddingVertical: 16,
     borderRadius: 12, alignItems: 'center', marginTop: 24, marginBottom: 8,

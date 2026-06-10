@@ -16,7 +16,8 @@
  */
 
 import { View, Text as RNText, TouchableOpacity } from 'react-native';
-import type { Transaction } from '../schemas/transaction';
+import { isPending as txIsPending, type Transaction } from '../schemas/transaction';
+import type { CategoryOverride } from '../schemas/categoryOverride';
 import { formatMoney } from './Money';
 import { Text, Stack, Card, Divider, color, radius, space } from '../design';
 import {
@@ -35,6 +36,8 @@ type Props = {
   showEmptyState?: boolean;
   /** Si se pasa, tap en cada item dispara este callback (F1-D Task #11 — editar). */
   onItemPress?: (t: Transaction) => void;
+  /** F1-L: overrides del business para que resolveCategory matchee customs y archive. */
+  categoryOverrides?: CategoryOverride[];
 };
 
 /**
@@ -110,6 +113,7 @@ export default function TransactionList({
   emptyMessage = 'Sin movimientos por ahora.',
   showEmptyState = true,
   onItemPress,
+  categoryOverrides,
 }: Props) {
   const items = limit != null ? transactions.slice(0, limit) : transactions;
 
@@ -131,7 +135,11 @@ export default function TransactionList({
     <Card variant="surface" padding="none">
       {items.map((t, i) => (
         <View key={t.id}>
-          <Item transaction={t} onPress={onItemPress} />
+          <Item
+            transaction={t}
+            onPress={onItemPress}
+            categoryOverrides={categoryOverrides}
+          />
           {i < items.length - 1 ? <Divider variant="subtle" /> : null}
         </View>
       ))}
@@ -143,11 +151,14 @@ export default function TransactionList({
 function Item({
   transaction,
   onPress,
+  categoryOverrides,
 }: {
   transaction: Transaction;
   onPress?: (t: Transaction) => void;
+  categoryOverrides?: CategoryOverride[];
 }) {
-  const cat = resolveCategory(transaction.category);
+  // F1-L: pasamos overrides para que customs muestren su label/icon real.
+  const cat = resolveCategory(transaction.category, categoryOverrides ?? []);
   const pm = resolvePaymentMethod(transaction.payment_method);
   const fallback = fallbackForType(transaction.type);
 
@@ -170,8 +181,9 @@ function Item({
   const sign = isIncome ? '+' : '−';
   const amountColor = tintToAmountColor(tint);
 
-  // Estado "pendiente": resaltar visualmente con tinte info y label "(pendiente)".
-  const isPending = transaction.status === 'pending';
+  // F1-J: estado pendiente desde settled_at (source of truth). El status legacy
+  // queda como fallback por si la fila no tiene settled_at por algún motivo.
+  const pending = txIsPending(transaction) || transaction.status === 'pending';
 
   /** El ítem se vuelve tappable solo si el caller pasó onPress.
    *  Para extraordinarios (no editables hoy) seguimos pasando el callback
@@ -203,7 +215,7 @@ function Item({
         <Stack gap="0" style={{ flex: 1 }}>
           <Text variant="bodyStrong" numberOfLines={1}>
             {primaryLabel}
-            {isPending ? '  ·  pendiente' : ''}
+            {pending ? '  ·  pendiente' : ''}
           </Text>
           <Text variant="caption" color="tertiary" numberOfLines={1}>
             {subParts.join('  ·  ')}

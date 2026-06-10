@@ -24,6 +24,13 @@ export type DetailLevel = z.infer<typeof DetailLevelEnum>;
 export const OperatorRoleEnum = z.enum(['solo', 'team', 'administrator']);
 export type OperatorRole = z.infer<typeof OperatorRoleEnum>;
 
+// F1-M.2: eje de desglose de los bloques flow (Ingresos/Costos del mes).
+//   'channel'  → suma por cuenta (Efectivo / MP / Banco / …)
+//   'category' → suma por etiqueta (Corte / Color / Tratamiento / …)
+// Una columna por bloque porque el uso real diverge.
+export const BreakdownAxisEnum = z.enum(['channel', 'category']);
+export type BreakdownAxis = z.infer<typeof BreakdownAxisEnum>;
+
 /**
  * BusinessSchema — forma esperada del row de businesses.
  *
@@ -43,6 +50,8 @@ export const BusinessSchema = z.object({
   detail_level: DetailLevelEnum.nullable().optional(),                 // NUEVO F0-2.5
   operator_role: OperatorRoleEnum.nullable().optional(),               // NUEVO F0-2.5
   threshold_hourly_rate: z.coerce.number().nonnegative().nullable().optional(), // NUEVO F0-2.5
+  income_breakdown_axis:  BreakdownAxisEnum.nullable().optional(),               // NUEVO F1-M.2
+  expense_breakdown_axis: BreakdownAxisEnum.nullable().optional(),               // NUEVO F1-M.2
 });
 
 export type Business = z.infer<typeof BusinessSchema>;
@@ -61,6 +70,19 @@ export function getDetailLevel(b: Business): DetailLevel {
  */
 export function getOperatorRole(b: Business): OperatorRole {
   return b.operator_role ?? 'solo';
+}
+
+/**
+ * F1-M.2 — helpers para los ejes de desglose del flow.
+ * Default 'channel' = lo que ya conoce el usuario hoy (composición por cuenta).
+ * Caer en default cubre el período entre deploy del código y aplicación de la
+ * migration `F1-M.2_breakdown_axis_migration.sql` en Supabase.
+ */
+export function getIncomeBreakdownAxis(b: Business): BreakdownAxis {
+  return b.income_breakdown_axis ?? 'channel';
+}
+export function getExpenseBreakdownAxis(b: Business): BreakdownAxis {
+  return b.expense_breakdown_axis ?? 'channel';
 }
 
 export function parseBusiness(raw: unknown): Business | null {

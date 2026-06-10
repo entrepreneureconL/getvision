@@ -17,11 +17,13 @@
 
 import { supabase } from '../lib/supabase';
 import { parseBusiness, type Business } from '../schemas/business';
+import { accountsRepo } from './accounts';
 
 // Las columnas que pedimos siempre. Si agregamos una, la sumamos acá una vez.
 const COLUMNS =
   'id, name, sector, rubro, subrubro, income_model, onboarding_completed, ' +
-  'detail_level, operator_role, threshold_hourly_rate';
+  'detail_level, operator_role, threshold_hourly_rate, ' +
+  'income_breakdown_axis, expense_breakdown_axis';
 
 export const businessesRepo = {
   /**
@@ -65,11 +67,18 @@ export const businessesRepo = {
    * Helper combinado: obtiene el business del usuario, lo crea si no existe.
    * Esta era la lógica duplicada en App.tsx y DashboardScreen.tsx.
    * Acá vive una sola vez.
+   *
+   * F1-J fix (bug post-deploy): garantiza también que el business tenga las
+   * 3 cuentas default (Efectivo / Mercado Pago / Banco). `ensureDefaultsForBusiness`
+   * es idempotente — no hace nada si ya hay alguna. Esto cierra el caso del
+   * business creado en F0 (pre-accounts) que llegaba a SaleForm sin cuentas y
+   * dejaba el botón Guardar deshabilitado en silencio.
    */
   async ensureForUser(userId: string): Promise<Business | null> {
-    const existing = await businessesRepo.getByUserId(userId);
-    if (existing) return existing;
-    return businessesRepo.createEmpty(userId);
+    let business = await businessesRepo.getByUserId(userId);
+    if (!business) business = await businessesRepo.createEmpty(userId);
+    if (business) await accountsRepo.ensureDefaultsForBusiness(business.id);
+    return business;
   },
 
   /**

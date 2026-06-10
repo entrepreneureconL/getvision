@@ -29,15 +29,26 @@ import { businessesRepo } from '../repos/businesses';
 import { transactionsRepo, type DashboardKPIs } from '../repos/transactions';
 import { productsRepo, type StockSummary } from '../repos/products';
 import { hoursLogRepo, type HoursSummary } from '../repos/hoursLog';
-import { analyticsRepo, type MetricResultWithPeriod, type MetricMeta } from '../repos/analytics';
-import type { Period } from '../utils/periods';
+import { analyticsRepo, type MetricResultWithPeriod, type MetricMeta, type MiPlataSnapshot, type MonthFlowResult } from '../repos/analytics';
+import { categoriesRepo } from '../repos/categories';
+import type { CategoryOverride } from '../schemas/categoryOverride';
+import { type Period, type StockPeriod } from '../utils/periods';
+import type { HistoryFilter } from '../utils/historyFilters';
 import {
   getDashboardConfig,
   type Business,
 } from '../utils/businessProfile';
-import { getDetailLevel } from '../schemas/business';
+import {
+  getDetailLevel,
+  getIncomeBreakdownAxis,
+  getExpenseBreakdownAxis,
+  type BreakdownAxis,
+} from '../schemas/business';
 import Money, { formatMoney } from '../components/Money';
 import HeroMetricCard   from '../components/HeroMetricCard';
+import MiPlataCard      from '../components/MiPlataCard';
+import MonthFlowCard    from '../components/MonthFlowCard';
+import PeriodBalanceCard from '../components/PeriodBalanceCard';
 import Container        from '../components/Container';
 import FAB              from '../components/FAB';
 import TransactionList  from '../components/TransactionList';
@@ -62,6 +73,8 @@ type Modal_ = null | 'sales' | 'costs' | 'movements' | 'product' | 'hours' | 'pi
 type Props = {
   onSignOut: () => void;
   onOpenSettings: () => void;
+  /** F1-M.4 — abre la HistoryScreen con un filtro pre-armado. */
+  onOpenHistory: (filter: HistoryFilter) => void;
 };
 
 const EMPTY_KPIS: DashboardKPIs = {
@@ -103,13 +116,26 @@ function buildSubInfo(meta: MetricMeta): string {
   return parts.join('  ·  ');
 }
 
-export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
+export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHistory }: Props) {
   const [business, setBusiness]               = useState<Business | null>(null);
   const [businessId, setBusinessId]           = useState('');
   const [kpis, setKpis]                       = useState<DashboardKPIs>(EMPTY_KPIS);
   const [stock, setStock]                     = useState<StockSummary>(EMPTY_STOCK);
   const [hours, setHours]                     = useState<HoursSummary>(EMPTY_HOURS);
   const [heroMetric, setHeroMetric]           = useState<MetricResultWithPeriod | null>(null);
+  /** F1-M Fase B — Snapshot de MiPlata con current + previous + delta. */
+  const [miPlataSnapshot, setMiPlataSnapshot] = useState<MiPlataSnapshot | null>(null);
+  /** Período del selector temporal de MiPlata (Hoy/Sem/Mes/Año).
+   *  Default 'month' alineado con el default del SegmentedControl flow — el
+   *  usuario abre la app y ve "balance ahora + ¿cómo varió este mes?". */
+  const [stockPeriod, setStockPeriod]         = useState<StockPeriod>('month');
+  /** F1-M.2 — Ingresos + Costos del período con doble desglose. Solo modo simple. */
+  const [monthFlow, setMonthFlow]             = useState<MonthFlowResult | null>(null);
+  /** F1-M.2 — eje del toggle Canal/Etiqueta. Optimistic en setter, persiste a businesses. */
+  const [incomeAxis, setIncomeAxis]           = useState<BreakdownAxis>('channel');
+  const [expenseAxis, setExpenseAxis]         = useState<BreakdownAxis>('channel');
+  /** F1-L — overrides del business, pasados a TransactionList para que customs muestren su label/icon real. */
+  const [categoryOverrides, setCategoryOverrides] = useState<CategoryOverride[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [activeModal, setActiveModal]         = useState<Modal_>(null);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
@@ -121,6 +147,18 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
   const loadHeroForPeriod = useCallback(async (biz: Business, p: Period) => {
     const hero = await analyticsRepo.getHeroMetricForPeriod(biz, p);
     setHeroMetric(hero);
+  }, []);
+
+  /** F1-M.2 — Carga selectiva del MonthFlow para un período. */
+  const loadFlowForPeriod = useCallback(async (biz: Business, p: Period) => {
+    const flow = await analyticsRepo.getMonthFlow(biz.id, p);
+    setMonthFlow(flow);
+  }, []);
+
+  /** F1-M Fase B — Carga selectiva del snapshot MiPlata para un stockPeriod. */
+  const loadMiPlataForPeriod = useCallback(async (biz: Business, sp: StockPeriod) => {
+    const snap = await analyticsRepo.getMiPlataSnapshot(biz.id, sp);
+    setMiPlataSnapshot(snap);
   }, []);
 
   /** Carga completa del dashboard. Usa el `period` actual del state para hero.
@@ -142,18 +180,26 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
       const needStock = detailLevel === 'detailed' && model !== 'services';
       const needHours = detailLevel === 'detailed' && model !== 'products';
       const needKPIs  = detailLevel === 'detailed';
+      const needFlow  = detailLevel === 'simple';  // F1-M.2: MonthFlowCard solo en simple
+      // F1-M Fase A (A1): la HeroMetricCard ("Tu hora rinde", "Daily revenue", etc.)
+      // migra a la futura tab Estadísticas. En el dashboard simple ya no se muestra
+      // porque MiPlata + Ingresos/Costos cubren la respuesta "¿cómo va mi negocio?".
+      const needHero  = detailLevel === 'detailed';
 
       // F1-D fix: ambos modos cargan 10 movimientos recientes.
       // En simple antes era 3 → causaba "lista incompleta" cuando el contador
       // del hero metric ("4 ventas") no coincidía con lo visible.
       const recentLimit = 10;
 
-      const [monthKPIs, stockSummary, hoursSummary, hero, recent] = await Promise.all([
+      const [monthKPIs, stockSummary, hoursSummary, hero, recent, snap, overrides, flow] = await Promise.all([
         needKPIs ? transactionsRepo.getKPIsForCurrentMonth(biz.id) : Promise.resolve(EMPTY_KPIS),
         needStock ? productsRepo.getStockSummary(biz.id) : Promise.resolve(EMPTY_STOCK),
         needHours ? hoursLogRepo.getSummaryForCurrentMonth(biz.id) : Promise.resolve(EMPTY_HOURS),
-        analyticsRepo.getHeroMetricForPeriod(biz, period),
+        needHero ? analyticsRepo.getHeroMetricForPeriod(biz, period) : Promise.resolve(null),
         transactionsRepo.listRecent(biz.id, recentLimit),
+        analyticsRepo.getMiPlataSnapshot(biz.id, stockPeriod),  // F1-M Fase B
+        categoriesRepo.listForBusiness(biz.id),  // F1-L
+        needFlow ? analyticsRepo.getMonthFlow(biz.id, period) : Promise.resolve(null),  // F1-M.2
       ]);
 
       setKpis(monthKPIs);
@@ -161,6 +207,13 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
       setHours(hoursSummary);
       setHeroMetric(hero);
       setRecentTransactions(recent);
+      setMiPlataSnapshot(snap);
+      setCategoryOverrides(overrides);
+      setMonthFlow(flow);
+
+      // F1-M.2 — sincronizar ejes con la preferencia del business.
+      setIncomeAxis(getIncomeBreakdownAxis(biz));
+      setExpenseAxis(getExpenseBreakdownAxis(biz));
     } catch (e) {
       console.error('[Dashboard] loadDashboardData error:', e);
     }
@@ -169,10 +222,43 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
 
   useEffect(() => { loadDashboardData(); }, [loadDashboardData]);
 
-  /** Cambio de período en el SegmentedControl — recargamos SOLO heroMetric. */
+  /** Cambio de período en el SegmentedControl — recargamos según el modo activo. */
   const handlePeriodChange = (next: Period) => {
     setPeriod(next);
-    if (business) loadHeroForPeriod(business, next);
+    if (!business) return;
+    const detail = getDetailLevel(business);
+    if (detail === 'detailed') loadHeroForPeriod(business, next);
+    if (detail === 'simple')   loadFlowForPeriod(business, next);
+  };
+
+  /**
+   * F1-M.2 — Toggle Canal/Etiqueta por bloque. Optimistic + persiste a Supabase.
+   * Si la migration no fue aplicada en DB, el patch fallará (columna inexistente)
+   * y revertimos el axis local a su valor previo. El componente sigue funcionando
+   * sin persistencia hasta que se corra `F1-M.2_breakdown_axis_migration.sql`.
+   */
+  const handleIncomeAxisChange = async (next: BreakdownAxis) => {
+    const previous = incomeAxis;
+    setIncomeAxis(next);
+    if (!business) return;
+    const updated = await businessesRepo.update(business.id, { income_breakdown_axis: next });
+    if (updated) setBusiness(updated);
+    else setIncomeAxis(previous);
+  };
+
+  const handleExpenseAxisChange = async (next: BreakdownAxis) => {
+    const previous = expenseAxis;
+    setExpenseAxis(next);
+    if (!business) return;
+    const updated = await businessesRepo.update(business.id, { expense_breakdown_axis: next });
+    if (updated) setBusiness(updated);
+    else setExpenseAxis(previous);
+  };
+
+  /** F1-M Fase B — cambio del selector temporal de MiPlata. */
+  const handleStockPeriodChange = (next: StockPeriod) => {
+    setStockPeriod(next);
+    if (business) loadMiPlataForPeriod(business, next);
   };
 
   const closeModal = () => {
@@ -222,6 +308,12 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
   })();
 
   const subInfoText = heroMetric ? buildSubInfo(heroMetric.meta) : '';
+
+  // F1-K.2: heurística "usuario ya experimentado" → picker compacto.
+  // Threshold low (5) porque listRecent trae hasta 10 — si tenemos al menos
+  // 5 ítems devueltos sabemos seguro que hay ≥5 transactions guardadas.
+  // Antes de eso mantenemos los items grandes con subtítulo pedagógico.
+  const isExperienced = recentTransactions.length >= 5;
 
   // ───── Sección modo detailed (legacy F0 — pendiente refactor) ─────
 
@@ -332,6 +424,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
           limit={10}
           emptyMessage="Sin movimientos este mes. Usá el botón + para empezar."
           onItemPress={handleTransactionPress}
+          categoryOverrides={categoryOverrides}
         />
       </>
     );
@@ -339,31 +432,78 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
 
   // ───── Sección modo simple (F1-D) ─────
 
+  // F1-M Fase A (A3 revertido tras feedback CEO 2026-06-09):
+  // La heurística inicial ("mostrar bloque flow solo si hay pendientes") era
+  // demasiado agresiva — ocultaba la métrica "¿cuánto entré este mes?" y el
+  // Balance, no solo la duplicación visual del desglose por canal. El usuario
+  // SIN pendientes igual quiere ver Ingresos / Costos / Balance del período.
+  //
+  // La duplicación real ("Efectivo/MP/Banco en MiPlata Y en Ingresos") se va a
+  // resolver con default axis='category' cuando no hay pendientes (Fase posterior)
+  // y/o con el bar chart de Fase C que cambia la lectura visual.
   const renderSimpleSection = () => (
     <>
-      {/* SegmentedControl Día/Semana/Mes — debajo de la HeroMetricCard. */}
-      <View style={{ marginTop: space['4'] }}>
-        <SegmentedControl<Period>
-          value={period}
-          onChange={handlePeriodChange}
-          options={[
-            { value: 'day', label: 'Día' },
-            { value: 'week', label: 'Semana' },
-            { value: 'month', label: 'Mes' },
-          ]}
-        />
-      </View>
+      {monthFlow ? (
+        <>
+          {/* SegmentedControl Día/Semana/Mes — controla solo los bloques flow. */}
+          <View style={{ marginTop: space['4'] }}>
+            <SegmentedControl<Period>
+              value={period}
+              onChange={handlePeriodChange}
+              options={[
+                { value: 'day', label: 'Día' },
+                { value: 'week', label: 'Semana' },
+                { value: 'month', label: 'Mes' },
+              ]}
+            />
+          </View>
 
-      {/* Sub-info contextual (F1-E parcial). */}
-      {subInfoText.length > 0 ? (
-        <Text
-          variant="caption"
-          color="tertiary"
-          align="center"
-          style={{ marginTop: space['3'], marginBottom: space['2'] }}
-        >
-          {subInfoText}
-        </Text>
+          {/* F1-M.2/F1-M.3 + Fase A.A2 — Ingresos → Costos → Balance.
+              Orden estado-de-resultados: el Balance cierra el cálculo al pie
+              (Ingresos − Costos = Balance), siguiendo la lectura natural.
+              Tone de costos: gris neutro por default, rojo solo si el balance
+              del período es negativo (regla §5.4.3 / Q3 cerrada por CEO). */}
+          <Stack gap="3" style={{ marginTop: space['4'] }}>
+            <MonthFlowCard
+              variant="income"
+              data={monthFlow.income}
+              axis={incomeAxis}
+              onAxisChange={handleIncomeAxisChange}
+              prevLabel={monthFlow.prevLabel}
+              onLinePress={(key, label) =>
+                onOpenHistory({
+                  type: 'income',
+                  axis: incomeAxis,
+                  key,
+                  label,
+                  period,
+                })
+              }
+            />
+            <MonthFlowCard
+              variant="expense"
+              data={monthFlow.expense}
+              axis={expenseAxis}
+              onAxisChange={handleExpenseAxisChange}
+              tone={monthFlow.income.total - monthFlow.expense.total < 0 ? 'danger' : 'neutral'}
+              prevLabel={monthFlow.prevLabel}
+              onLinePress={(key, label) =>
+                onOpenHistory({
+                  type: 'expense',
+                  axis: expenseAxis,
+                  key,
+                  label,
+                  period,
+                })
+              }
+            />
+            <PeriodBalanceCard
+              income={monthFlow.income.total}
+              expense={monthFlow.expense.total}
+              period={period}
+            />
+          </Stack>
+        </>
       ) : null}
 
       {/* Lista de movimientos */}
@@ -392,6 +532,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
             limit={10}
             showEmptyState={false}
             onItemPress={handleTransactionPress}
+            categoryOverrides={categoryOverrides}
           />
         </View>
       )}
@@ -422,41 +563,76 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
           <View style={styles.handle} />
           <RNText style={styles.pickerTitle}>¿Qué querés registrar?</RNText>
 
-          <TouchableOpacity
-            style={[styles.pickerItem, { borderLeftColor: '#27AE60' }]}
-            onPress={() => { setShowMoreOptions(false); setActiveModal('sales'); }}
-            activeOpacity={0.75}
-          >
-            <RNText style={styles.pickerIcon}>💰</RNText>
-            <View style={styles.pickerTextWrap}>
-              <RNText style={styles.pickerItemTitle}>Cobrar</RNText>
-              <RNText style={styles.pickerItemSub}>Lo que entró a tu negocio</RNText>
-            </View>
-          </TouchableOpacity>
+          {isExperienced ? (
+            // F1-K.2: modo compacto (chips 3-en-fila) para usuario con ≥5 tx.
+            <View style={styles.compactRow}>
+              <TouchableOpacity
+                style={[styles.compactItem, { borderColor: '#1A6B3A' }]}
+                onPress={() => { setShowMoreOptions(false); setActiveModal('sales'); }}
+                activeOpacity={0.75}
+              >
+                <RNText style={styles.compactIcon}>💰</RNText>
+                <RNText style={styles.compactLabel}>Cobrar</RNText>
+              </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.pickerItem, { borderLeftColor: '#E67E22' }]}
-            onPress={() => { setShowMoreOptions(false); setActiveModal('costs'); }}
-            activeOpacity={0.75}
-          >
-            <RNText style={styles.pickerIcon}>🛒</RNText>
-            <View style={styles.pickerTextWrap}>
-              <RNText style={styles.pickerItemTitle}>Pagar</RNText>
-              <RNText style={styles.pickerItemSub}>Lo que gastaste</RNText>
-            </View>
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.compactItem, { borderColor: '#B85C00' }]}
+                onPress={() => { setShowMoreOptions(false); setActiveModal('costs'); }}
+                activeOpacity={0.75}
+              >
+                <RNText style={styles.compactIcon}>🛒</RNText>
+                <RNText style={styles.compactLabel}>Pagar</RNText>
+              </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.pickerItem, { borderLeftColor: '#2E86C1' }]}
-            onPress={() => { setShowMoreOptions(false); setActiveModal('hours'); }}
-            activeOpacity={0.75}
-          >
-            <RNText style={styles.pickerIcon}>⏱</RNText>
-            <View style={styles.pickerTextWrap}>
-              <RNText style={styles.pickerItemTitle}>Horas trabajadas</RNText>
-              <RNText style={styles.pickerItemSub}>El tiempo que le dedicaste</RNText>
+              <TouchableOpacity
+                style={[styles.compactItem, { borderColor: '#2E86C1' }]}
+                onPress={() => { setShowMoreOptions(false); setActiveModal('hours'); }}
+                activeOpacity={0.75}
+              >
+                <RNText style={styles.compactIcon}>⏱</RNText>
+                <RNText style={styles.compactLabel}>Horas</RNText>
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          ) : (
+            // F0/F1-D: modo grande con subtítulo pedagógico para onboarding.
+            <>
+              <TouchableOpacity
+                style={[styles.pickerItem, { borderLeftColor: '#27AE60' }]}
+                onPress={() => { setShowMoreOptions(false); setActiveModal('sales'); }}
+                activeOpacity={0.75}
+              >
+                <RNText style={styles.pickerIcon}>💰</RNText>
+                <View style={styles.pickerTextWrap}>
+                  <RNText style={styles.pickerItemTitle}>Cobrar</RNText>
+                  <RNText style={styles.pickerItemSub}>Lo que entró a tu negocio</RNText>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.pickerItem, { borderLeftColor: '#E67E22' }]}
+                onPress={() => { setShowMoreOptions(false); setActiveModal('costs'); }}
+                activeOpacity={0.75}
+              >
+                <RNText style={styles.pickerIcon}>🛒</RNText>
+                <View style={styles.pickerTextWrap}>
+                  <RNText style={styles.pickerItemTitle}>Pagar</RNText>
+                  <RNText style={styles.pickerItemSub}>Lo que gastaste</RNText>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.pickerItem, { borderLeftColor: '#2E86C1' }]}
+                onPress={() => { setShowMoreOptions(false); setActiveModal('hours'); }}
+                activeOpacity={0.75}
+              >
+                <RNText style={styles.pickerIcon}>⏱</RNText>
+                <View style={styles.pickerTextWrap}>
+                  <RNText style={styles.pickerItemTitle}>Horas trabajadas</RNText>
+                  <RNText style={styles.pickerItemSub}>El tiempo que le dedicaste</RNText>
+                </View>
+              </TouchableOpacity>
+            </>
+          )}
 
           <TouchableOpacity
             style={styles.moreToggle}
@@ -541,13 +717,38 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
             </Stack>
           </Stack>
 
-          {/* Hero metric — con comparativa solo en modo simple */}
-          {heroMetric && (
+          {/* F1-M.1 — "Mi plata hoy" (stock) con composición por canal,
+              arriba en modo simple. Hereda de F1-J.5a el tap-to-pending
+              (atajo directo a MovementForm > Pendientes, su tab default).
+              F1-M.4 conectará `onChannelPress` para tap-to-filter por cuenta. */}
+          {detailLevel === 'simple' && miPlataSnapshot ? (
+            <View style={{ marginBottom: space['3'] }}>
+              <MiPlataCard
+                snapshot={miPlataSnapshot}
+                onPendingPress={() => setActiveModal('movements')}
+                onStockPeriodChange={handleStockPeriodChange}
+                onChannelPress={(account) =>
+                  onOpenHistory({
+                    type: 'all',
+                    axis: 'channel',
+                    key: account.id,
+                    label: account.name,
+                    period: 'month',
+                  })
+                }
+              />
+            </View>
+          ) : null}
+
+          {/* Hero metric — F1-M Fase A: solo en modo detailed. En simple, la
+              HeroMetricCard se mueve a la futura tab "Estadísticas". El dashboard
+              simple usa Mi Plata + Ingresos/Costos para contestar "¿cómo voy?". */}
+          {detailLevel === 'detailed' && heroMetric && (
             <HeroMetricCard
               metric={heroMetric}
               contextualNote={balanceContextualNote}
-              comparison={detailLevel === 'simple' ? heroMetric.comparison : null}
-              previousLabel={detailLevel === 'simple' ? heroMetric.previousLabel : undefined}
+              comparison={null}
+              previousLabel={undefined}
             />
           )}
 
@@ -563,6 +764,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
       {activeModal === 'sales' && businessId.length > 0 && (
         <SaleForm
           businessId={businessId}
+          rubro={business?.rubro ?? null}
           transaction={editingTransaction ?? undefined}
           onSuccess={closeModal}
           onClose={() => { setActiveModal(null); setEditingTransaction(null); }}
@@ -571,6 +773,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings }: Props) {
       {activeModal === 'costs' && businessId.length > 0 && (
         <CostForm
           businessId={businessId}
+          rubro={business?.rubro ?? null}
           transaction={editingTransaction ?? undefined}
           onSuccess={closeModal}
           onClose={() => { setActiveModal(null); setEditingTransaction(null); }}
@@ -648,6 +851,20 @@ const styles = StyleSheet.create({
   pickerTextWrap:    { flex: 1 },
   pickerItemTitle:   { color: '#FFF', fontSize: 14, fontWeight: '600' },
   pickerItemSub:     { color: '#7F8C8D', fontSize: 11, marginTop: 2 },
+
+  /* F1-K.2: variantes compactas para usuario experimentado (≥5 tx). */
+  compactRow:        { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  compactItem: {
+    flex: 1,
+    backgroundColor: '#141422',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  compactIcon:       { fontSize: 26, marginBottom: 4 },
+  compactLabel:      { color: '#FFF', fontSize: 13, fontWeight: '600' },
   moreToggle:        { paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   moreToggleText:    { color: token.accent.base, fontSize: 12, fontWeight: '500' },
   pickerCancel:      { paddingVertical: 14, alignItems: 'center', marginTop: 8, borderRadius: 12, borderWidth: 1, borderColor: '#2A2A4A' },

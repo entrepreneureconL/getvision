@@ -5,13 +5,16 @@ import { supabase } from './src/lib/supabase';
 import { businessesRepo } from './src/repos/businesses';
 import type { Business } from './src/schemas/business';
 import ErrorBoundary from './src/components/ErrorBoundary';
+import ConfirmProvider from './src/components/ConfirmProvider';
 import WelcomeScreen    from './src/screens/WelcomeScreen';
 import LoginScreen      from './src/screens/LoginScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import DashboardScreen  from './src/screens/DashboardScreen';
 import SettingsScreen   from './src/screens/SettingScreen';
+import HistoryScreen    from './src/screens/HistoryScreen';
+import type { HistoryFilter } from './src/utils/historyFilters';
 
-type Screen = 'welcome' | 'login' | 'onboarding' | 'dashboard' | 'settings';
+type Screen = 'welcome' | 'login' | 'onboarding' | 'dashboard' | 'settings' | 'history';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('welcome');
@@ -19,6 +22,8 @@ export default function App() {
   const [businessId, setBusinessId]       = useState('');
   const [business, setBusiness]           = useState<Business | null>(null);
   const [showConfirmed, setShowConfirmed] = useState(false);
+  // F1-M.4 — filtro activo cuando currentScreen='history'. null en cualquier otra pantalla.
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter | null>(null);
 
   useEffect(() => { checkSession(); }, []);
 
@@ -104,6 +109,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      <ConfirmProvider>
       <StatusBar style="light" />
 
       {currentScreen === 'welcome' && (
@@ -125,6 +131,10 @@ export default function App() {
         <DashboardScreen
           onSignOut={handleSignOut}
           onOpenSettings={() => setCurrentScreen('settings')}
+          onOpenHistory={(filter) => {
+            setHistoryFilter(filter);
+            setCurrentScreen('history');
+          }}
         />
       )}
       {currentScreen === 'settings' && businessId.length > 0 && (
@@ -132,6 +142,16 @@ export default function App() {
           businessId={businessId}
           onBack={() => setCurrentScreen('dashboard')}
           onSaved={handleSettingsSaved}
+        />
+      )}
+      {currentScreen === 'history' && businessId.length > 0 && historyFilter && (
+        <HistoryScreen
+          businessId={businessId}
+          initialFilter={historyFilter}
+          onBack={() => {
+            setHistoryFilter(null);
+            setCurrentScreen('dashboard');
+          }}
         />
       )}
 
@@ -160,6 +180,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
       )}
+      </ConfirmProvider>
     </ErrorBoundary>
   );
 }

@@ -1,16 +1,23 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
-  StyleSheet, Text, View, TextInput, TouchableOpacity, Alert,
+  StyleSheet, Text, View, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, Dimensions
 } from 'react-native';
+import { confirmDestructive } from '../utils/confirm';
 import { supabase } from '../lib/supabase';
 import {
   getCategoriesForType,
-  PAYMENT_METHODS as PM_CATALOG,
+  paymentMethodFromAccountKind,
   resolveCategory,
 } from '../utils/transactionCategories';
+import { todayLocalISO } from '../utils/periods';
 import { transactionsRepo } from '../repos/transactions';
+import { accountsRepo } from '../repos/accounts';
+import { categoriesRepo } from '../repos/categories';
+import AddCategoryModal from './AddCategoryModal';
 import type { Transaction } from '../schemas/transaction';
+import type { Account } from '../schemas/account';
+import type { CategoryOverride } from '../schemas/categoryOverride';
 
 const { width } = Dimensions.get('window');
 const FORM_WIDTH = Math.min(400, width - 48);
@@ -21,53 +28,103 @@ type Props = {
   onClose: () => void;
   /** Si está presente, el form trabaja en modo edición. F1-D Task #11. */
   transaction?: Transaction;
+  /** F1-L.5: rubro del business para sugerencias contextuales en AddCategoryModal. */
+  rubro?: string | null;
 };
 
-const PAYMENT_METHODS = PM_CATALOG
-  .filter(m => ['cash', 'transfer', 'credit', 'pending'].includes(m.value))
-  .map(m => ({
-    key: m.value,
-    label: `${m.icon} ${m.value === 'pending' ? 'A pagar' : m.label}`,
-  }));
+// F1-K.1 (ADR #22): el picker de "Forma de pago" se eliminó. payment_method
+// ahora se deriva del kind de la cuenta seleccionada al guardar.
+// F1-L: las categorías se componen dentro del componente con overrides.
 
-const CATEGORIES = getCategoriesForType('expense');
-
-export default function CostForm({ businessId, onSuccess, onClose, transaction }: Props) {
+export default function CostForm({ businessId, onSuccess, onClose, transaction, rubro }: Props) {
   const isEdit = !!transaction;
 
   const initialCategory = transaction?.category
-    ? (resolveCategory(transaction.category)?.value ?? CATEGORIES[0]?.value ?? 'supplies')
-    : (CATEGORIES[0]?.value ?? 'supplies');
+    ? (resolveCategory(transaction.category)?.value ?? transaction.category)
+    : 'supplies';
+
+  // F1-L: overrides del business.
+  const [overrides, setOverrides] = useState<CategoryOverride[]>([]);
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const categories = useMemo(
+    () => getCategoriesForType('expense', overrides),
+    [overrides],
+  );
+
+  // F1-J.5b: en costos hablamos de from_account_id (la cuenta que paga).
+  // Default para new: isSettled=true (caso típico — pagás al momento).
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [isSettled, setIsSettled] = useState<boolean>(
+    isEdit ? transaction!.settled_at != null : true
+  );
+  const [accountId, setAccountId] = useState<string | null>(
+    transaction?.from_account_id ?? null
+  );
 
   const [amount, setAmount] = useState(
     transaction ? String(transaction.amount).replace('.', ',') : '',
   );
   const [description, setDescription] = useState(transaction?.description ?? '');
-  const [paymentMethod, setPaymentMethod] = useState(transaction?.payment_method ?? 'cash');
   const [category, setCategory] = useState<string>(initialCategory);
   const [date, setDate] = useState(
-    transaction?.date ?? new Date().toISOString().split('T')[0],
+    transaction?.date ?? todayLocalISO(),
   );
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
 
+  /** F1-J/L: cargar cuentas + overrides en paralelo al montar. */
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const [accs, ovs] = await Promise.all([
+        accountsRepo.listActive(businessId),
+        categoriesRepo.listForBusiness(businessId),
+      ]);
+      if (!active) return;
+      setAccounts(accs);
+      setOverrides(ovs);
+      if (!accountId) {
+        const def = accs.find(a => a.is_default) ?? accs[0];
+        if (def) setAccountId(def.id);
+      }
+    })();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessId]);
+
   const amountNumber = parseFloat(amount.replace(',', '.'));
-  const canSubmit = !isNaN(amountNumber) && amountNumber > 0 && !loading;
+  const canSubmit = !isNaN(amountNumber)
+    && amountNumber > 0
+    && !loading
+    && (!isSettled || accountId != null);
 
   const handleSave = async () => {
     if (!canSubmit) return;
     setLoading(true);
     setError('');
+
+    // F1-K.1: payment_method se deriva del kind de la cuenta origen.
+    const settledAt = isSettled ? date : null;
+    const fromAccountId = isSettled ? accountId : null;
+    const selectedAccount = isSettled && accountId
+      ? accounts.find(a => a.id === accountId)
+      : null;
+    const finalPaymentMethod = selectedAccount
+      ? paymentMethodFromAccountKind(selectedAccount.kind)
+      : null;
+
     try {
       if (isEdit && transaction) {
         const ok = await transactionsRepo.update(transaction.id, {
           amount: amountNumber,
           date,
-          payment_method: paymentMethod,
+          payment_method: finalPaymentMethod,
           category,
           description: description || null,
-          status: paymentMethod === 'pending' ? 'pending' : 'completed',
+          status: isSettled ? 'completed' : 'pending',
+          settled_at: settledAt,
+          from_account_id: fromAccountId,
         });
         if (!ok) throw new Error('No se pudo actualizar el costo.');
       } else {
@@ -78,10 +135,12 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction }
             type: 'expense',
             amount: amountNumber,
             date,
-            payment_method: paymentMethod,
+            payment_method: finalPaymentMethod,
             category,
             description: description || null,
-            status: paymentMethod === 'pending' ? 'pending' : 'completed',
+            status: isSettled ? 'completed' : 'pending',
+            settled_at: settledAt,
+            from_account_id: fromAccountId,
           });
         if (insertError) throw insertError;
       }
@@ -93,28 +152,21 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction }
     }
   };
 
-  /** Eliminar — solo en modo edit. */
+  /** Eliminar — solo en modo edit. Confirmación cross-platform. */
   const handleDelete = () => {
     if (!isEdit || !transaction) return;
-    Alert.alert(
-      '¿Eliminar este costo?',
-      'Esta acción no se puede deshacer.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            setDeleting(true);
-            setError('');
-            const ok = await transactionsRepo.remove(transaction.id);
-            setDeleting(false);
-            if (ok) onSuccess();
-            else setError('No se pudo eliminar el costo.');
-          },
-        },
-      ],
-    );
+    confirmDestructive({
+      title: '¿Eliminar este costo?',
+      message: 'Esta acción no se puede deshacer.',
+      onConfirm: async () => {
+        setDeleting(true);
+        setError('');
+        const ok = await transactionsRepo.remove(transaction.id);
+        setDeleting(false);
+        if (ok) onSuccess();
+        else setError('No se pudo eliminar el costo.');
+      },
+    });
   };
 
   return (
@@ -145,7 +197,7 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction }
 
           <Text style={styles.label}>Categoría</Text>
           <View style={styles.chipsRow}>
-            {CATEGORIES.map(cat => (
+            {categories.map(cat => (
               <TouchableOpacity
                 key={cat.value}
                 style={[styles.chip, category === cat.value && styles.chipActive]}
@@ -156,23 +208,65 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction }
                 </Text>
               </TouchableOpacity>
             ))}
+            {/* F1-L: + Nueva — abre AddCategoryModal */}
+            <TouchableOpacity
+              style={[styles.chip, styles.chipAdd]}
+              onPress={() => setShowAddCategory(true)}
+            >
+              <Text style={[styles.chipText, styles.chipAddText]}>+ Nueva</Text>
+            </TouchableOpacity>
           </View>
 
-          <Text style={styles.label}>Forma de pago</Text>
+          {/* F1-J.5b: estado del pago */}
+          <Text style={styles.label}>Estado del pago</Text>
           <View style={styles.chipsRow}>
-            {PAYMENT_METHODS.map(pm => (
-              <TouchableOpacity
-                key={pm.key}
-                style={[styles.chip, paymentMethod === pm.key && styles.chipActiveOrange]}
-                onPress={() => setPaymentMethod(pm.key)}
-              >
-                <Text style={[styles.chipText,
-                  paymentMethod === pm.key && styles.chipTextActive]}>
-                  {pm.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <TouchableOpacity
+              style={[styles.chip, isSettled && styles.chipActiveOrange]}
+              onPress={() => setIsSettled(true)}
+            >
+              <Text style={[styles.chipText, isSettled && styles.chipTextActive]}>
+                ✓ Ya pagué
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.chip, !isSettled && styles.chipActivePending]}
+              onPress={() => setIsSettled(false)}
+            >
+              <Text style={[styles.chipText, !isSettled && styles.chipTextActive]}>
+                ⏳ Pendiente
+              </Text>
+            </TouchableOpacity>
           </View>
+
+          {/* F1-K.1: solo cuenta origen — payment_method se deriva del kind. */}
+          {isSettled && accounts.length > 0 && (
+            <>
+              <Text style={styles.label}>¿De qué cuenta salió la plata?</Text>
+              <View style={styles.chipsRow}>
+                {accounts.map(a => (
+                  <TouchableOpacity
+                    key={a.id}
+                    style={[styles.chip, accountId === a.id && styles.chipActiveOrange]}
+                    onPress={() => setAccountId(a.id)}
+                  >
+                    <Text style={[styles.chipText, accountId === a.id && styles.chipTextActive]}>
+                      {a.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* F1-J.5b: ayuda contextual cuando "pendiente" */}
+          {!isSettled && (
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>
+                ⏳ Este costo queda en "Por pagar". Vas a poder marcarlo como pagado
+                cuando saldés, eligiendo de qué cuenta salió la plata.
+              </Text>
+            </View>
+          )}
 
           <Text style={styles.label}>Fecha</Text>
           <TextInput
@@ -228,6 +322,20 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction }
 
         </ScrollView>
       </View>
+
+      {/* F1-L: modal de creación de categoría custom. */}
+      <AddCategoryModal
+        visible={showAddCategory}
+        businessId={businessId}
+        type="expense"
+        rubro={rubro}
+        existingOverrides={overrides}
+        onClose={() => setShowAddCategory(false)}
+        onCreated={(created) => {
+          setOverrides(prev => [...prev, created]);
+          setCategory(created.value);
+        }}
+      />
     </View>
   );
 }
@@ -274,6 +382,11 @@ const styles = StyleSheet.create({
   },
   chipActive: { backgroundColor: '#2B1A00', borderColor: '#B85C00' },
   chipActiveOrange: { backgroundColor: '#2B1A00', borderColor: '#B85C00' },
+  /** F1-J.5b: estado "pendiente" — amarillo/ámbar, distinto del naranja "pagado". */
+  chipActivePending: { backgroundColor: '#2B2200', borderColor: '#A67800' },
+  /** F1-L: chip "+ Nueva categoría" — borde dashed teal. */
+  chipAdd: { borderColor: '#1F8579', borderStyle: 'dashed' },
+  chipAddText: { color: '#1F8579' },
   chipText: { color: '#7F8C8D', fontSize: 13 },
   chipTextActive: { color: '#FFFFFF' },
   errorBox: {
@@ -281,6 +394,12 @@ const styles = StyleSheet.create({
     borderRadius: 8, padding: 12, marginTop: 16,
   },
   errorText: { color: '#E74C3C', fontSize: 13 },
+  /** F1-J.5b: caja de ayuda contextual cuando el pago queda pendiente. */
+  infoBox: {
+    backgroundColor: '#1A1500', borderWidth: 1, borderColor: '#3A2E00',
+    borderRadius: 10, padding: 12, marginTop: 12,
+  },
+  infoText: { color: '#D6BF66', fontSize: 12, lineHeight: 17 },
   saveBtn: {
     backgroundColor: '#B85C00', paddingVertical: 16,
     borderRadius: 12, alignItems: 'center', marginTop: 24, marginBottom: 8,

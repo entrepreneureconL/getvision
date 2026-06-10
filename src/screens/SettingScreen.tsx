@@ -20,6 +20,7 @@ import { supabase } from '../lib/supabase';
 import { SECTORS, RUBROS, SUBRUBROS } from '../utils/businessProfile';
 import type { DetailLevel } from '../schemas/business';
 import Container from '../components/Container';
+import CategoriesEditor from '../components/CategoriesEditor';
 import {
   Heading,
   Text,
@@ -35,7 +36,7 @@ import {
 
 const { width } = Dimensions.get('window');
 
-type TabKey = 'general' | 'actividad' | 'preferencias';
+type TabKey = 'general' | 'actividad' | 'preferencias' | 'categorias';
 
 type Props = {
   businessId: string;
@@ -177,6 +178,7 @@ export default function SettingsScreen({ businessId, onBack, onSaved }: Props) {
               { value: 'general',      label: 'General' },
               { value: 'actividad',    label: 'Actividad' },
               { value: 'preferencias', label: 'Preferencias' },
+              { value: 'categorias',   label: 'Categorías' },
             ]}
           />
         </View>
@@ -360,6 +362,14 @@ export default function SettingsScreen({ businessId, onBack, onSaved }: Props) {
             </Stack>
           )}
 
+          {/* ════════════════ Tab: Categorías (F1-L.4) ════════════════ */}
+          {activeTab === 'categorias' && (
+            <CategoriesEditor
+              businessId={businessId}
+              rubro={rubro || null}
+            />
+          )}
+
           {/* Mensajes */}
           {error.length > 0 && (
             <Card variant="surface" padding="md" style={{ marginTop: space['4'], backgroundColor: color.danger.subtle }}>
@@ -375,20 +385,22 @@ export default function SettingsScreen({ businessId, onBack, onSaved }: Props) {
         </Container>
       </ScrollView>
 
-      {/* Botón guardar */}
-      <View style={styles.footer}>
-        <Container>
-          <Button
-            variant="primary"
-            size="lg"
-            fullWidth
-            loading={saving}
-            onPress={handleSave}
-          >
-            Guardar cambios
-          </Button>
-        </Container>
-      </View>
+      {/* Botón guardar — escondido en tab Categorías (auto-persisten). */}
+      {activeTab !== 'categorias' && (
+        <View style={styles.footer}>
+          <Container>
+            <Button
+              variant="primary"
+              size="lg"
+              fullWidth
+              loading={saving}
+              onPress={handleSave}
+            >
+              Guardar cambios
+            </Button>
+          </Container>
+        </View>
+      )}
 
     </SafeAreaView>
   );

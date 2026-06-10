@@ -16,6 +16,7 @@ import {
   type HoursLog,
   type HoursLogInsert,
 } from '../schemas/hoursLog';
+import { toLocalISODate } from '../utils/periods';
 
 const COLUMNS =
   'id, business_id, date, hours, hourly_rate, description, client_name, billable, created_at';
@@ -55,8 +56,8 @@ export const hoursLogRepo = {
     year: number,
     month: number,
   ): Promise<HoursLog[]> {
-    const firstDay = new Date(year, month - 1, 1).toISOString().split('T')[0];
-    const lastDay = new Date(year, month, 0).toISOString().split('T')[0];
+    const firstDay = toLocalISODate(new Date(year, month - 1, 1));
+    const lastDay = toLocalISODate(new Date(year, month, 0));
 
     const { data, error } = await supabase
       .from('hours_log')
