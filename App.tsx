@@ -29,9 +29,11 @@ export default function App() {
 
   const checkSession = async () => {
     try {
-      if (typeof window !== 'undefined' && window.location.hash?.includes('access_token')) {
-        window.history.replaceState(null, '', window.location.pathname);
-      }
+      // OAuth web (PKCE, fix 2026-06-10): al volver de Google la URL trae
+      // `?code=` y el cliente supabase lo canjea solo durante la inicialización
+      // (detectSessionInUrl: true). getSession() espera ese canje, así que acá
+      // ya tenemos la sesión establecida. El strip manual del hash con
+      // access_token (flujo implicit viejo) ya no es necesario.
       const { data: { session } } = await supabase.auth.getSession();
       if (session) await resolveScreen(session.user.id);
     } catch (e) {

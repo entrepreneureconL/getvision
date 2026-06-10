@@ -22,11 +22,22 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+// Fix OAuth web (2026-06-10):
+//   - flowType 'pkce': el redirect de Google vuelve con `?code=` de un solo
+//     uso en lugar de tokens en el hash (#access_token). Más seguro — ningún
+//     token queda en historial del browser ni en logs — y es el flujo
+//     recomendado por Supabase para SPAs.
+//   - detectSessionInUrl true: al volver del OAuth la página recarga entera,
+//     el cliente detecta el `?code=`, lo canjea por sesión y limpia la URL.
+//     App.checkSession lo ve vía getSession() (espera la inicialización).
+//   Con el valor previo (false) los tokens del redirect se descartaban y el
+//   login con Google nunca establecía sesión en web.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: AsyncStorage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    detectSessionInUrl: true,
+    flowType: 'pkce',
   },
 });

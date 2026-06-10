@@ -99,9 +99,20 @@ export default function LoginScreen({
   };
 
   const handleGoogle = async () => {
+    // redirectTo dinámico: en web usa el origin real (localhost en dev,
+    // dominio Vercel en prod). El hardcode previo a localhost:8081 rompía
+    // el login con Google en producción (fix 2026-06-10). La URL debe estar
+    // en la allowlist de Supabase → Auth → URL Configuration → Redirect URLs.
+    // En native el flujo OAuth requiere deep linking (pendiente F2) — ahí
+    // redirectTo queda undefined y Supabase usa el Site URL configurado.
+    const redirectTo =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : undefined;
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: 'http://localhost:8081' },
+      options: redirectTo ? { redirectTo } : undefined,
     });
     if (error) {
       setErrorMsg('Error al iniciar con Google: ' + error.message);
