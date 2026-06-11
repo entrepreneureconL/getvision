@@ -26,6 +26,7 @@ import {
   PeriodBars,
   TabBar,
   SideNav,
+  ProportionList,
   color,
   space,
   type TabItem,
@@ -162,6 +163,20 @@ export default function DesignPreviewScreen() {
 
         <Section title="TabBar — navegación inferior (D-4, Ionicons)">
           <TabBar items={PREVIEW_TABS} active={previewTab} onChange={setPreviewTab} />
+        </Section>
+
+        <Section title="ProportionList — composición con barras (D-6)">
+          <Card padding="lg">
+            <ProportionList
+              tint={color.success.base}
+              items={[
+                { key: 'service', label: 'Venta de servicio', valueLabel: '$ 350.000,00', percent: 71 },
+                { key: 'product', label: 'Venta de producto', valueLabel: '$ 142.400,00', percent: 29 },
+                { key: '__unlabeled', label: 'Sin etiqueta', valueLabel: '$ 12.000,00', percent: 4, dimmed: true },
+              ]}
+              onItemPress={(key) => console.log('[preview] proportion press', key)}
+            />
+          </Card>
         </Section>
 
         <Section title="SideNav — navegación escritorio (D-15 paso 2)">

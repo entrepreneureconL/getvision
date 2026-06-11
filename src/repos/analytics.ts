@@ -546,6 +546,8 @@ function buildFlowBlock(
  * Labels por período:
  *   week  → inicial del día (L M X J V S D).
  *   month → número de día solo en 1 y múltiplos de 5 (eje respirable).
+ *   year  → D-6: UN punto por MES (12 barras, inicial del mes). Bucket
+ *           distinto porque 365 barras diarias no se leen.
  *   day   → 'Hoy' (un solo punto; el caller decide no graficarlo).
  */
 function buildFlowSeries(
@@ -553,6 +555,29 @@ function buildFlowSeries(
   period: Period,
   range: PeriodRange,
 ): FlowSeriesPoint[] {
+  if (period === 'year') {
+    const MONTH_INITIALS = ['E', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+    const incomeByMonth = new Array(12).fill(0);
+    const expenseByMonth = new Array(12).fill(0);
+    for (const t of transactions) {
+      const m = Number(t.date.slice(5, 7)) - 1; // 'YYYY-MM-DD' → 0-11
+      if (m < 0 || m > 11) continue;
+      if (t.type === 'income') incomeByMonth[m] += t.amount;
+      else if (t.type === 'expense') expenseByMonth[m] += t.amount;
+    }
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const year = range.start.slice(0, 4);
+    // Sin meses futuros — misma regla de honestidad que con los días.
+    return Array.from({ length: currentMonth + 1 }, (_, m) => ({
+      date: `${year}-${String(m + 1).padStart(2, '0')}-01`,
+      label: MONTH_INITIALS[m],
+      income: incomeByMonth[m],
+      expense: expenseByMonth[m],
+      isToday: m === currentMonth,
+    }));
+  }
+
   const incomeByDate = new Map<string, number>();
   const expenseByDate = new Map<string, number>();
   for (const t of transactions) {
@@ -755,7 +780,14 @@ export const analyticsRepo = {
       prevLabel: range.prevLabel,
       // D-2 — serie para <PeriodBars/>. Computada de las tx ya fetcheadas.
       series: buildFlowSeries(currentTx, period, range),
-      prevDailyAvgIncome: dailyAvgIncome(previousTx, range.prevStart, range.prevEnd),
+      // D-6: para 'year' las barras son MENSUALES → el promedio de referencia
+      // también (total ingresos año anterior / 12), no el diario.
+      prevDailyAvgIncome:
+        period === 'year'
+          ? previousTx
+              .filter(t => t.type === 'income')
+              .reduce((s, t) => s + t.amount, 0) / 12
+          : dailyAvgIncome(previousTx, range.prevStart, range.prevEnd),
     };
   },
 

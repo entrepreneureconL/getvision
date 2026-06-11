@@ -60,6 +60,7 @@ const PERIOD_NOUN: Record<Period, string> = {
   day:   'del día',
   week:  'de la semana',
   month: 'del mes',
+  year:  'del año',
 };
 
 const KIND_COPY: Record<FlowKind, { title: string; singular: string; plural: string }> = {

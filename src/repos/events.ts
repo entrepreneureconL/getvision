@@ -27,7 +27,8 @@ export type AppEventName =
   | 'session_start'          // boot con sesión válida o login exitoso
   | 'onboarding_completed'   // usuario terminó el onboarding
   | 'transaction_created'    // venta/costo/movimiento creado (props: type, category, settled)
-  | 'transaction_settled';   // pendiente marcado como cobrado/pagado
+  | 'transaction_settled'    // pendiente marcado como cobrado/pagado
+  | 'hint_tap';              // D-5: tap en hint contextual (props: key) — mide si la anticipación sirve
 
 export const eventsRepo = {
   /**

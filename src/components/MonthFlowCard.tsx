@@ -72,6 +72,7 @@ const PERIOD_NOUN: Record<Period, string> = {
   day:   'del día',
   week:  'de la semana',
   month: 'del mes',
+  year:  'del año',
 };
 
 const VARIANT_COPY: Record<Variant, {

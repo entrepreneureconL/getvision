@@ -157,6 +157,7 @@ export default function HistoryScreen({
                 { value: 'day', label: 'Día' },
                 { value: 'week', label: 'Semana' },
                 { value: 'month', label: 'Mes' },
+                { value: 'year', label: 'Año' }, // D-6: filtros desde Stats llegan anuales
               ]}
             />
           </View>

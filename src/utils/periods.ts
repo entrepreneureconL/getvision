@@ -21,7 +21,9 @@
  * sin librería (date-fns / dayjs) para no inflar el bundle por algo simple.
  */
 
-export type Period = 'day' | 'week' | 'month';
+/** D-6: 'year' se suma para la pantalla Stats (comparativas anuales).
+ *  El dashboard sigue ofreciendo solo day/week/month en su selector. */
+export type Period = 'day' | 'week' | 'month' | 'year';
 
 /**
  * F1-M Fase B — período del selector temporal de MiPlataCard.
@@ -174,6 +176,18 @@ export function getPeriodRange(
         prevEnd: toISODate(prevLastDay),
         label: monthLabel(firstDay),
         prevLabel: monthLabel(prevFirstDay),
+      };
+    }
+    case 'year': {
+      // D-6 — año calendario completo vs año anterior completo.
+      const y = today.getFullYear();
+      return {
+        start: toISODate(new Date(y, 0, 1)),
+        end: toISODate(new Date(y, 11, 31)),
+        prevStart: toISODate(new Date(y - 1, 0, 1)),
+        prevEnd: toISODate(new Date(y - 1, 11, 31)),
+        label: String(y),
+        prevLabel: String(y - 1),
       };
     }
   }

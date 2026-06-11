@@ -34,3 +34,5 @@ export { default as PeriodBars } from './components/PeriodBars';
 export { default as TabBar } from './components/TabBar';
 export type { TabItem } from './components/TabBar';
 export { default as SideNav } from './components/SideNav';
+export { default as ProportionList } from './components/ProportionList';
+export type { ProportionItem } from './components/ProportionList';

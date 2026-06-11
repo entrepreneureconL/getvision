@@ -110,7 +110,9 @@ export default function MainTabs({
         />
       ) : null}
 
-      {tab === 'stats' ? <StatsScreen business={business} /> : null}
+      {tab === 'stats' ? (
+        <StatsScreen business={business} onOpenHistory={openHistory} />
+      ) : null}
 
       {tab === 'profile' ? (
         <SettingsScreen

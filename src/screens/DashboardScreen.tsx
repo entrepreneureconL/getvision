@@ -14,7 +14,7 @@
  * Lo refactorizamos cuando le toque (#6 o más adelante).
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   Text as RNText,
@@ -34,8 +34,15 @@ import { hoursLogRepo, type HoursSummary } from '../repos/hoursLog';
 import { analyticsRepo, type MetricResultWithPeriod, type MetricMeta, type MiPlataSnapshot, type MonthFlowResult } from '../repos/analytics';
 import { categoriesRepo } from '../repos/categories';
 import type { CategoryOverride } from '../schemas/categoryOverride';
-import { type Period, type StockPeriod } from '../utils/periods';
+import { todayLocalISO, type Period, type StockPeriod } from '../utils/periods';
 import type { HistoryFilter } from '../utils/historyFilters';
+import {
+  getContextualHint,
+  shouldShowCostsFirst,
+  type ContextualHint as Hint,
+} from '../utils/anticipation';
+import { eventsRepo } from '../repos/events';
+import ContextualHintBanner from '../components/ContextualHint';
 import {
   getDashboardConfig,
   type Business,
@@ -104,6 +111,7 @@ const STOCK_OF: Record<Period, StockPeriod> = {
   day: 'today',
   week: 'week',
   month: 'month',
+  year: 'year', // D-6: el dashboard no ofrece 'year' en su selector, pero el tipo lo exige
 };
 
 /** Saludo según hora del día. Pequeño detalle de calidez. */
@@ -161,6 +169,36 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   const [period, setPeriod]                   = useState<Period>('month');
   /** F1-D Task #11: si está seteada, los forms se abren en modo edit. */
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  /** D-5 — keys de hints descartados en ESTA sesión (sin persistencia v1). */
+  const [dismissedHints, setDismissedHints] = useState<string[]>([]);
+
+  // ── D-5: anticipación nivel 1 ──
+  // Hint contextual por hora/día + señal "¿registró algo hoy?" de las
+  // transactions ya cargadas (cero queries extra).
+  const hasTransactionsToday = useMemo(
+    () => recentTransactions.some(t => t.date === todayLocalISO()),
+    [recentTransactions],
+  );
+  const hint = useMemo(
+    () => getContextualHint({ hasTransactionsToday }),
+    [hasTransactionsToday],
+  );
+  const visibleHint = hint && !dismissedHints.includes(hint.key) ? hint : null;
+
+  const handleHintAction = (h: Hint) => {
+    if (businessId) eventsRepo.track(businessId, 'hint_tap', { key: h.key });
+    setDismissedHints(prev => [...prev, h.key]);
+    if (h.action === 'open_sale') setActiveModal('sales');
+    else if (h.action === 'open_picker') setActiveModal('picker');
+    else if (h.action === 'switch_week') handlePeriodChange('week');
+  };
+
+  // Orden del picker por frecuencia (F1-K.2 intacto: solo orden, nada se
+  // esconde ni compacta — mismo modo pedagógico para todos).
+  const costsFirst = useMemo(
+    () => shouldShowCostsFirst(recentTransactions),
+    [recentTransactions],
+  );
 
   /** Carga selectiva: hero + meta para un período específico. Liviano. */
   const loadHeroForPeriod = useCallback(async (biz: Business, p: Period) => {
@@ -609,31 +647,43 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
           <RNText style={styles.pickerTitle}>¿Qué querés registrar?</RNText>
 
           {/* Modo simple genérico para todos (items grandes con subtítulo
-              pedagógico). F1-K.2 compacto revertido — decisión CEO 2026-06-10. */}
-          {/* D-3: Ionicons con el color semántico de cada acción (tokens). */}
-          <TouchableOpacity
-            style={[styles.pickerItem, { borderLeftColor: token.success.base }]}
-            onPress={() => { setShowMoreOptions(false); setActiveModal('sales'); }}
-            activeOpacity={0.75}
-          >
-            <Ionicons name="cash-outline" size={22} color={token.success.base} style={styles.pickerIcon} />
-            <View style={styles.pickerTextWrap}>
-              <RNText style={styles.pickerItemTitle}>Cobrar</RNText>
-              <RNText style={styles.pickerItemSub}>Lo que entró a tu negocio</RNText>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.pickerItem, { borderLeftColor: token.warning.base }]}
-            onPress={() => { setShowMoreOptions(false); setActiveModal('costs'); }}
-            activeOpacity={0.75}
-          >
-            <Ionicons name="cart-outline" size={22} color={token.warning.base} style={styles.pickerIcon} />
-            <View style={styles.pickerTextWrap}>
-              <RNText style={styles.pickerItemTitle}>Pagar</RNText>
-              <RNText style={styles.pickerItemSub}>Lo que gastaste</RNText>
-            </View>
-          </TouchableOpacity>
+              pedagógico). F1-K.2 compacto revertido — decisión CEO 2026-06-10.
+              D-5: solo cambia el ORDEN según frecuencia de uso (nada se
+              esconde): si registrás más costos que ventas, "Pagar" sube. */}
+          {(costsFirst
+            ? (['costs', 'sales'] as const)
+            : (['sales', 'costs'] as const)
+          ).map((kind, index) => {
+            const isSale = kind === 'sales';
+            const accent = isSale ? token.success.base : token.warning.base;
+            const showFrequentTag = index === 0 && recentTransactions.length >= 5;
+            return (
+              <TouchableOpacity
+                key={kind}
+                style={[styles.pickerItem, { borderLeftColor: accent }]}
+                onPress={() => { setShowMoreOptions(false); setActiveModal(kind); }}
+                activeOpacity={0.75}
+              >
+                <Ionicons
+                  name={isSale ? 'cash-outline' : 'cart-outline'}
+                  size={22}
+                  color={accent}
+                  style={styles.pickerIcon}
+                />
+                <View style={styles.pickerTextWrap}>
+                  <RNText style={styles.pickerItemTitle}>
+                    {isSale ? 'Cobrar' : 'Pagar'}
+                  </RNText>
+                  <RNText style={styles.pickerItemSub}>
+                    {isSale ? 'Lo que entró a tu negocio' : 'Lo que gastaste'}
+                  </RNText>
+                </View>
+                {showFrequentTag ? (
+                  <RNText style={styles.pickerFrequentTag}>frecuente</RNText>
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
 
           <TouchableOpacity
             style={[styles.pickerItem, { borderLeftColor: token.info.base }]}
@@ -734,6 +784,17 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
           {/* G-1 — el ÚNICO selector de período de la pantalla. Gobierna
               MiPlata + Balance + Ingresos/Costos. Pegado arriba para que el
               usuario entienda que todo lo de abajo responde al mismo reloj. */}
+          {/* D-5 — hint contextual (descartable). Solo cuando una regla aplica. */}
+          {detailLevel === 'simple' && visibleHint ? (
+            <View style={{ marginBottom: space['3'] }}>
+              <ContextualHintBanner
+                hint={visibleHint}
+                onAction={handleHintAction}
+                onDismiss={(h) => setDismissedHints(prev => [...prev, h.key])}
+              />
+            </View>
+          ) : null}
+
           {detailLevel === 'simple' ? (
             <View
               style={{
@@ -862,6 +923,17 @@ const styles = StyleSheet.create({
     borderLeftColor: '#1C1C30',
   },
   pickerIcon:        { width: 28, textAlign: 'center' },
+  /** D-5 — tag sutil en la acción más frecuente del picker. */
+  pickerFrequentTag: {
+    color: token.accent.base,
+    fontSize: 10,
+    fontWeight: '600',
+    backgroundColor: token.accent.subtle,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
   pickerTextWrap:    { flex: 1 },
   pickerItemTitle:   { color: '#FFF', fontSize: 14, fontWeight: '600' },
   pickerItemSub:     { color: '#7F8C8D', fontSize: 11, marginTop: 2 },

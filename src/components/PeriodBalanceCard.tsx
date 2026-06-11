@@ -50,6 +50,7 @@ const PERIOD_LABEL: Record<Period, string> = {
   day:   'Balance del día',
   week:  'Balance de la semana',
   month: 'Balance del mes',
+  year:  'Balance del año',
 };
 
 export default function PeriodBalanceCard({
