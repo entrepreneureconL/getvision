@@ -68,6 +68,7 @@ import {
   color as token,
   space,
   radius,
+  breakpoint,
 } from '../design';
 
 type Modal_ = null | 'sales' | 'costs' | 'movements' | 'product' | 'hours' | 'picker';
@@ -131,15 +132,13 @@ function buildSubInfo(meta: MetricMeta): string {
   return parts.join('  ·  ');
 }
 
-/** D-15 — breakpoint de escritorio. Por debajo: layout móvil de una columna
- *  (el validado con las referencias Screen Time). Por encima: dos columnas
- *  estilo dashboard web (referencia CoinMarketCap, feedback CEO 2026-06-11). */
-const WIDE_BREAKPOINT = 1100;
-
 export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHistory }: Props) {
-  // D-15: ancho reactivo — en web responde al resize del navegador.
+  // D-15: ancho reactivo — en web responde al resize del navegador. Por debajo
+  // del breakpoint: una columna (layout validado con Screen Time). Por encima:
+  // dos columnas estilo dashboard web (ref. CoinMarketCap). Fuente única del
+  // umbral: `breakpoint.wide` del DS (mismo que usa MainTabs para el sidebar).
   const { width: windowWidth } = useWindowDimensions();
-  const isWide = windowWidth >= WIDE_BREAKPOINT;
+  const isWide = windowWidth >= breakpoint.wide;
   const [business, setBusiness]               = useState<Business | null>(null);
   const [businessId, setBusinessId]           = useState('');
   const [kpis, setKpis]                       = useState<DashboardKPIs>(EMPTY_KPIS);

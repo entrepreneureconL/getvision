@@ -174,9 +174,12 @@ export default function MiPlataCard({
         <Text style={displayStyle}>
           {variation > 0 ? '+ ' : variation < 0 ? '− ' : ''}
           $ {splitMoneyParts(variation).int}
+          {/* color explícito: el <Text> del DS aplica su default 'primary'
+              (blanco) si no se lo pisa — la herencia no alcanza acá. */}
           <Text
             style={{
               fontSize: Math.round(tokenText.size['5xl'] * 0.5),
+              color: variationColor,
               opacity: 0.55,
               fontWeight: tokenText.weight.medium as '500',
             }}

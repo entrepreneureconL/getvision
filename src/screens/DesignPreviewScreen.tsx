@@ -25,6 +25,7 @@ import {
   Card,
   PeriodBars,
   TabBar,
+  SideNav,
   color,
   space,
   type TabItem,
@@ -161,6 +162,12 @@ export default function DesignPreviewScreen() {
 
         <Section title="TabBar — navegación inferior (D-4, Ionicons)">
           <TabBar items={PREVIEW_TABS} active={previewTab} onChange={setPreviewTab} />
+        </Section>
+
+        <Section title="SideNav — navegación escritorio (D-15 paso 2)">
+          <View style={{ height: 320, flexDirection: 'row' }}>
+            <SideNav items={PREVIEW_TABS} active={previewTab} onChange={setPreviewTab} />
+          </View>
         </Section>
 
         <Section title="FlowPairSection — par Ingresos/Costos (D-9)">

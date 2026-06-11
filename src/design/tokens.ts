@@ -247,6 +247,18 @@ export const shadow = {
 } as const;
 
 /* ─────────────────────────────────────────────────────────────
+ * BREAKPOINTS (D-15)
+ * ────────────────────────────────────────────────────────────
+ * Un solo punto de quiebre por ahora: móvil/tablet (una columna,
+ * bottom tabs) vs escritorio (grilla multi-columna, sidebar).
+ * Fuente única — DashboardScreen y MainTabs leen de acá.
+ */
+export const breakpoint = {
+  /** >= wide → layout escritorio (sidebar + columnas). */
+  wide: 1100,
+} as const;
+
+/* ─────────────────────────────────────────────────────────────
  * BARREL — para imports cómodos
  * ────────────────────────────────────────────────────────────
  *   import { color, space } from '@/design/tokens';

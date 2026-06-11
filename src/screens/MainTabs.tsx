@@ -24,14 +24,14 @@
  */
 
 import { useState } from 'react';
-import { View } from 'react-native';
+import { View, useWindowDimensions } from 'react-native';
 import DashboardScreen from './DashboardScreen';
 import HistoryScreen from './HistoryScreen';
 import StatsScreen from './StatsScreen';
 import SettingsScreen from './SettingScreen';
 import { ALL_KEY, type HistoryFilter } from '../utils/historyFilters';
 import type { Business } from '../utils/businessProfile';
-import { TabBar, color, type TabItem } from '../design';
+import { TabBar, SideNav, color, breakpoint, type TabItem } from '../design';
 
 type TabKey = 'home' | 'movements' | 'stats' | 'profile';
 
@@ -70,6 +70,11 @@ export default function MainTabs({
   // tap-to-history; el re-tap de la tab lo resetea a ALL_FILTER.
   const [movementsFilter, setMovementsFilter] = useState<HistoryFilter>(ALL_FILTER);
 
+  // D-15 paso 2: en escritorio la navegación es sidebar (patrón web, ref.
+  // CoinMarketCap); las bottom tabs quedan para teléfono/tablet (patrón pulgar).
+  const { width } = useWindowDimensions();
+  const isWide = width >= breakpoint.wide;
+
   const handleTabChange = (next: TabKey) => {
     if (next === 'movements' && tab === 'movements') {
       setMovementsFilter(ALL_FILTER); // re-tap = raíz de la tab
@@ -82,41 +87,53 @@ export default function MainTabs({
     setTab('movements');
   };
 
+  const renderActiveScreen = () => (
+    <>
+      {tab === 'home' ? (
+        <DashboardScreen
+          onSignOut={onSignOut}
+          onOpenSettings={() => setTab('profile')}
+          onOpenHistory={openHistory}
+        />
+      ) : null}
+
+      {tab === 'movements' ? (
+        <HistoryScreen
+          key={`${movementsFilter.key}-${movementsFilter.type}-${movementsFilter.label}`}
+          businessId={businessId}
+          initialFilter={movementsFilter}
+          onBack={
+            movementsFilter.key === ALL_KEY
+              ? undefined // raíz de la tab: no hay "volver"
+              : () => setMovementsFilter(ALL_FILTER)
+          }
+        />
+      ) : null}
+
+      {tab === 'stats' ? <StatsScreen business={business} /> : null}
+
+      {tab === 'profile' ? (
+        <SettingsScreen
+          businessId={businessId}
+          onBack={() => setTab('home')}
+          onSaved={onSettingsSaved}
+        />
+      ) : null}
+    </>
+  );
+
+  if (isWide) {
+    return (
+      <View style={{ flex: 1, flexDirection: 'row', backgroundColor: color.bg.base }}>
+        <SideNav items={TAB_ITEMS} active={tab} onChange={handleTabChange} />
+        <View style={{ flex: 1 }}>{renderActiveScreen()}</View>
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: color.bg.base }}>
-      <View style={{ flex: 1 }}>
-        {tab === 'home' ? (
-          <DashboardScreen
-            onSignOut={onSignOut}
-            onOpenSettings={() => setTab('profile')}
-            onOpenHistory={openHistory}
-          />
-        ) : null}
-
-        {tab === 'movements' ? (
-          <HistoryScreen
-            key={`${movementsFilter.key}-${movementsFilter.type}-${movementsFilter.label}`}
-            businessId={businessId}
-            initialFilter={movementsFilter}
-            onBack={
-              movementsFilter.key === ALL_KEY
-                ? undefined // raíz de la tab: no hay "volver"
-                : () => setMovementsFilter(ALL_FILTER)
-            }
-          />
-        ) : null}
-
-        {tab === 'stats' ? <StatsScreen business={business} /> : null}
-
-        {tab === 'profile' ? (
-          <SettingsScreen
-            businessId={businessId}
-            onBack={() => setTab('home')}
-            onSaved={onSettingsSaved}
-          />
-        ) : null}
-      </View>
-
+      <View style={{ flex: 1 }}>{renderActiveScreen()}</View>
       <TabBar items={TAB_ITEMS} active={tab} onChange={handleTabChange} />
     </View>
   );

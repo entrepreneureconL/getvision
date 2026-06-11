@@ -17,7 +17,7 @@
  *   Navegación:    TabBar (D-4, ADR #13)
  */
 
-export { color, space, radius, text, shadow, tokens } from './tokens';
+export { color, space, radius, text, shadow, breakpoint, tokens } from './tokens';
 export type { SpaceKey, RadiusKey, SizeKey, WeightKey } from './tokens';
 export type { PeriodBarPoint } from './components/PeriodBars';
 
@@ -33,3 +33,4 @@ export { default as Chip } from './components/Chip';
 export { default as PeriodBars } from './components/PeriodBars';
 export { default as TabBar } from './components/TabBar';
 export type { TabItem } from './components/TabBar';
+export { default as SideNav } from './components/SideNav';
