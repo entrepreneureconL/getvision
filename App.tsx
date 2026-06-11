@@ -10,12 +10,11 @@ import ConfirmProvider from './src/components/ConfirmProvider';
 import WelcomeScreen    from './src/screens/WelcomeScreen';
 import LoginScreen      from './src/screens/LoginScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
-import DashboardScreen  from './src/screens/DashboardScreen';
-import SettingsScreen   from './src/screens/SettingScreen';
-import HistoryScreen    from './src/screens/HistoryScreen';
-import type { HistoryFilter } from './src/utils/historyFilters';
+import MainTabs         from './src/screens/MainTabs';
 
-type Screen = 'welcome' | 'login' | 'onboarding' | 'dashboard' | 'settings' | 'history';
+// D-4 (ADR #13): la zona logueada vive en MainTabs (Inicio/Movimientos/Stats/
+// Perfil). La máquina de estados de App queda solo para el flujo de auth.
+type Screen = 'welcome' | 'login' | 'onboarding' | 'main';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('welcome');
@@ -23,8 +22,6 @@ export default function App() {
   const [businessId, setBusinessId]       = useState('');
   const [business, setBusiness]           = useState<Business | null>(null);
   const [showConfirmed, setShowConfirmed] = useState(false);
-  // F1-M.4 — filtro activo cuando currentScreen='history'. null en cualquier otra pantalla.
-  const [historyFilter, setHistoryFilter] = useState<HistoryFilter | null>(null);
 
   useEffect(() => { checkSession(); }, []);
 
@@ -63,7 +60,7 @@ export default function App() {
     if (biz) {
       setBusinessId(biz.id);
       setBusiness(biz);
-      setCurrentScreen(biz.onboarding_completed ? 'dashboard' : 'onboarding');
+      setCurrentScreen(biz.onboarding_completed ? 'main' : 'onboarding');
     } else {
       // ensureForUser devolvió null → algo falló. Volver a welcome es safe.
       console.warn('[App] resolveScreen: no se pudo obtener/crear business');
@@ -85,7 +82,7 @@ export default function App() {
   const handleOnboardingComplete = () => {
     // F1-N: timestamp para medir duración del onboarding (target F1-H < 2 min).
     if (businessId) eventsRepo.track(businessId, 'onboarding_completed');
-    setCurrentScreen('dashboard');
+    setCurrentScreen('main');
   };
 
   const handleSignOut = async () => {
@@ -102,7 +99,7 @@ export default function App() {
     if (user) {
       await resolveScreen(user.id);
     } else {
-      setCurrentScreen('dashboard');
+      setCurrentScreen('main');
     }
   };
 
@@ -147,31 +144,12 @@ export default function App() {
           onComplete={handleOnboardingComplete}
         />
       )}
-      {currentScreen === 'dashboard' && (
-        <DashboardScreen
+      {currentScreen === 'main' && businessId.length > 0 && business && (
+        <MainTabs
+          businessId={businessId}
+          business={business}
           onSignOut={handleSignOut}
-          onOpenSettings={() => setCurrentScreen('settings')}
-          onOpenHistory={(filter) => {
-            setHistoryFilter(filter);
-            setCurrentScreen('history');
-          }}
-        />
-      )}
-      {currentScreen === 'settings' && businessId.length > 0 && (
-        <SettingsScreen
-          businessId={businessId}
-          onBack={() => setCurrentScreen('dashboard')}
-          onSaved={handleSettingsSaved}
-        />
-      )}
-      {currentScreen === 'history' && businessId.length > 0 && historyFilter && (
-        <HistoryScreen
-          businessId={businessId}
-          initialFilter={historyFilter}
-          onBack={() => {
-            setHistoryFilter(null);
-            setCurrentScreen('dashboard');
-          }}
+          onSettingsSaved={handleSettingsSaved}
         />
       )}
 

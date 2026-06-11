@@ -16,6 +16,7 @@
  */
 
 import { View, Text as RNText, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { isPending as txIsPending, type Transaction } from '../schemas/transaction';
 import type { CategoryOverride } from '../schemas/categoryOverride';
 import { formatMoney } from './Money';
@@ -122,7 +123,7 @@ export default function TransactionList({
     return (
       <Card variant="surface" padding="lg">
         <Stack gap="2" align="center">
-          <RNText style={{ fontSize: 28 }}>📭</RNText>
+          <Ionicons name="file-tray-outline" size={28} color={color.text.tertiary} />
           <Text variant="caption" color="tertiary" align="center">
             {emptyMessage}
           </Text>

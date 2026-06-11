@@ -14,6 +14,7 @@
  *   Forms:         Input
  *   Estado/Filtro: SegmentedControl, Chip
  *   Datos:         PeriodBars (D-2, GETVISION_DESIGN §4.3)
+ *   Navegación:    TabBar (D-4, ADR #13)
  */
 
 export { color, space, radius, text, shadow, tokens } from './tokens';
@@ -30,3 +31,5 @@ export { default as Input } from './components/Input';
 export { default as SegmentedControl } from './components/SegmentedControl';
 export { default as Chip } from './components/Chip';
 export { default as PeriodBars } from './components/PeriodBars';
+export { default as TabBar } from './components/TabBar';
+export type { TabItem } from './components/TabBar';

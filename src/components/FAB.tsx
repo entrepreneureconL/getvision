@@ -16,10 +16,11 @@
  *   - 60×60 (touch target cómodo según WCAG: mínimo 44×44).
  *   - Círculo perfecto (borderRadius = width/2).
  *   - Shadow para destacarlo sobre el contenido del scroll.
- *   - Color primario (#2E86C1) para call-to-action claro.
+ *   - Color: teal de marca (D-3 — antes azul legacy #2E86C1, pre-ADR #11).
  */
 
 import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
+import { color as token } from '../design';
 
 type Props = {
   onPress: () => void;
@@ -38,7 +39,7 @@ type Props = {
 export default function FAB({
   onPress,
   label = '+',
-  color = '#2E86C1',
+  color = token.accent.base,
   right = 24,
   bottom = 24,
   size = 60,

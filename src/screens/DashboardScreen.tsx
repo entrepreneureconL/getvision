@@ -23,7 +23,9 @@ import {
   ScrollView,
   SafeAreaView,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { businessesRepo } from '../repos/businesses';
 import { transactionsRepo, type DashboardKPIs } from '../repos/transactions';
@@ -129,7 +131,15 @@ function buildSubInfo(meta: MetricMeta): string {
   return parts.join('  ·  ');
 }
 
+/** D-15 — breakpoint de escritorio. Por debajo: layout móvil de una columna
+ *  (el validado con las referencias Screen Time). Por encima: dos columnas
+ *  estilo dashboard web (referencia CoinMarketCap, feedback CEO 2026-06-11). */
+const WIDE_BREAKPOINT = 1100;
+
 export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHistory }: Props) {
+  // D-15: ancho reactivo — en web responde al resize del navegador.
+  const { width: windowWidth } = useWindowDimensions();
+  const isWide = windowWidth >= WIDE_BREAKPOINT;
   const [business, setBusiness]               = useState<Business | null>(null);
   const [businessId, setBusinessId]           = useState('');
   const [kpis, setKpis]                       = useState<DashboardKPIs>(EMPTY_KPIS);
@@ -449,90 +459,141 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   // La duplicación real ("Efectivo/MP/Banco en MiPlata Y en Ingresos") se va a
   // resolver con default axis='category' cuando no hay pendientes (Fase posterior)
   // y/o con el bar chart de Fase C que cambia la lectura visual.
-  const renderSimpleSection = () => (
-    <>
-      {monthFlow ? (
-        <>
-          {/* G-3 (GETVISION_DESIGN) — Balance ARRIBA como héroe del período,
-              con el gráfico <PeriodBars/> contando la historia día a día (G-2).
-              D-9: Ingresos/Costos ahora son un PAR horizontal (tiles lado a
-              lado, uso del ancho de pantalla) con detalle expandible a ancho
-              completo — el desglose canal/etiqueta + tap-to-history intactos
-              ("¿cuánto cobré en efectivo esta semana?" vive ahí). */}
-          <Stack gap="3" style={{ marginTop: space['4'] }}>
-            <PeriodBalanceCard
-              income={monthFlow.income.total}
-              expense={monthFlow.expense.total}
-              period={period}
-              series={monthFlow.series}
-              prevDailyAvgIncome={monthFlow.prevDailyAvgIncome}
-              prevIncome={monthFlow.income.previousTotal}
-              prevExpense={monthFlow.expense.previousTotal}
-              prevLabel={monthFlow.prevLabel}
-            />
-            <FlowPairSection
-              flow={monthFlow}
-              period={period}
-              incomeAxis={incomeAxis}
-              expenseAxis={expenseAxis}
-              onIncomeAxisChange={handleIncomeAxisChange}
-              onExpenseAxisChange={handleExpenseAxisChange}
-              onLinePress={(kind, key, label) =>
-                onOpenHistory({
-                  type: kind,
-                  axis: kind === 'income' ? incomeAxis : expenseAxis,
-                  key,
-                  label,
-                  period,
-                })
-              }
-            />
-          </Stack>
-        </>
-      ) : null}
+  // D-15: la sección simple se descompone en bloques que se COMPONEN distinto
+  // según el ancho: una columna en móvil (orden validado con Screen Time),
+  // dos columnas en escritorio (referencia CoinMarketCap — feedback CEO).
+  // Mismos componentes, misma data; cambia solo la disposición.
 
-      {/* Lista de movimientos */}
-      {recentTransactions.length === 0 ? (
-        <View style={{ marginTop: space['5'] }}>
-          <Stack gap="2" align="center" style={{
-            backgroundColor: token.bg.raised,
-            borderRadius: radius.lg,
-            padding: space['6'],
-          }}>
-            <Heading level={4} align="center">
-              Cargá tu primer movimiento para empezar
-            </Heading>
-            <Text variant="caption" color="secondary" align="center">
-              Usá el botón + abajo a la derecha cuando cobres, pagues o trabajes.
-            </Text>
-          </Stack>
-        </View>
-      ) : (
-        <View style={{ marginTop: space['5'] }}>
-          <Text variant="micro" color="secondary" uppercase style={{ marginBottom: space['2'] }}>
-            Últimos movimientos
-          </Text>
-          <TransactionList
-            transactions={recentTransactions}
-            limit={10}
-            showEmptyState={false}
-            onItemPress={handleTransactionPress}
-            categoryOverrides={categoryOverrides}
-          />
-        </View>
-      )}
+  const renderMiPlata = () =>
+    miPlataSnapshot ? (
+      <MiPlataCard
+        snapshot={miPlataSnapshot}
+        onPendingPress={() => setActiveModal('movements')}
+        onChannelPress={(account) =>
+          onOpenHistory({
+            type: 'all',
+            axis: 'channel',
+            key: account.id,
+            label: account.name,
+            period,
+          })
+        }
+      />
+    ) : null;
 
-      <TouchableOpacity
-        style={{ paddingVertical: space['4'], marginTop: space['4'] }}
-        onPress={onOpenSettings}
-        activeOpacity={0.7}
-      >
-        <Text variant="caption" color="accent" align="center">
-          ¿Querés ver tu negocio con más detalle? Activá modo detallado en Ajustes ↗
+  const renderFlowHero = () =>
+    monthFlow ? (
+      <PeriodBalanceCard
+        income={monthFlow.income.total}
+        expense={monthFlow.expense.total}
+        period={period}
+        series={monthFlow.series}
+        prevDailyAvgIncome={monthFlow.prevDailyAvgIncome}
+        prevIncome={monthFlow.income.previousTotal}
+        prevExpense={monthFlow.expense.previousTotal}
+        prevLabel={monthFlow.prevLabel}
+      />
+    ) : null;
+
+  const renderFlowPair = () =>
+    monthFlow ? (
+      <FlowPairSection
+        flow={monthFlow}
+        period={period}
+        incomeAxis={incomeAxis}
+        expenseAxis={expenseAxis}
+        onIncomeAxisChange={handleIncomeAxisChange}
+        onExpenseAxisChange={handleExpenseAxisChange}
+        onLinePress={(kind, key, label) =>
+          onOpenHistory({
+            type: kind,
+            axis: kind === 'income' ? incomeAxis : expenseAxis,
+            key,
+            label,
+            period,
+          })
+        }
+      />
+    ) : null;
+
+  const renderMovimientos = () =>
+    recentTransactions.length === 0 ? (
+      <Stack gap="2" align="center" style={{
+        backgroundColor: token.bg.raised,
+        borderRadius: radius.lg,
+        padding: space['6'],
+      }}>
+        <Heading level={4} align="center">
+          Cargá tu primer movimiento para empezar
+        </Heading>
+        <Text variant="caption" color="secondary" align="center">
+          Usá el botón + abajo a la derecha cuando cobres, pagues o trabajes.
         </Text>
-      </TouchableOpacity>
-    </>
+      </Stack>
+    ) : (
+      <View>
+        <Text variant="micro" color="secondary" uppercase style={{ marginBottom: space['2'] }}>
+          Últimos movimientos
+        </Text>
+        <TransactionList
+          transactions={recentTransactions}
+          limit={10}
+          showEmptyState={false}
+          onItemPress={handleTransactionPress}
+          categoryOverrides={categoryOverrides}
+        />
+      </View>
+    );
+
+  const renderDetailHint = () => (
+    <TouchableOpacity
+      style={{ paddingVertical: space['4'], marginTop: space['4'] }}
+      onPress={onOpenSettings}
+      activeOpacity={0.7}
+    >
+      <Text variant="caption" color="accent" align="center">
+        ¿Querés ver tu negocio con más detalle? Activá modo detallado en Ajustes ↗
+      </Text>
+    </TouchableOpacity>
   );
+
+  const renderSimpleSection = () =>
+    isWide ? (
+      // ── Escritorio (D-15): dos columnas. Izquierda = plata y flujo
+      //    (MiPlata + Ingresos/Costos); derecha = historia (Balance con
+      //    gráfico + últimos movimientos). El ojo lee F: estado → relato.
+      <>
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: space['4'],
+            alignItems: 'flex-start',
+            marginTop: space['4'],
+          }}
+        >
+          <Stack gap="3" style={{ flex: 5 }}>
+            {renderMiPlata()}
+            {renderFlowPair()}
+          </Stack>
+          <Stack gap="3" style={{ flex: 7 }}>
+            {renderFlowHero()}
+            {renderMovimientos()}
+          </Stack>
+        </View>
+        {renderDetailHint()}
+      </>
+    ) : (
+      // ── Móvil/tablet: una columna (orden G-3 validado).
+      <>
+        <View style={{ marginTop: space['3'] }}>{renderMiPlata()}</View>
+        <Stack gap="3" style={{ marginTop: space['3'] }}>
+          {renderFlowHero()}
+          {renderFlowPair()}
+        </Stack>
+        <View style={{ marginTop: space['5'] }}>{renderMovimientos()}</View>
+        {renderDetailHint()}
+      </>
+    );
 
   // ───── Action picker (igual que F0) ─────
 
@@ -550,12 +611,13 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
 
           {/* Modo simple genérico para todos (items grandes con subtítulo
               pedagógico). F1-K.2 compacto revertido — decisión CEO 2026-06-10. */}
+          {/* D-3: Ionicons con el color semántico de cada acción (tokens). */}
           <TouchableOpacity
-            style={[styles.pickerItem, { borderLeftColor: '#27AE60' }]}
+            style={[styles.pickerItem, { borderLeftColor: token.success.base }]}
             onPress={() => { setShowMoreOptions(false); setActiveModal('sales'); }}
             activeOpacity={0.75}
           >
-            <RNText style={styles.pickerIcon}>💰</RNText>
+            <Ionicons name="cash-outline" size={22} color={token.success.base} style={styles.pickerIcon} />
             <View style={styles.pickerTextWrap}>
               <RNText style={styles.pickerItemTitle}>Cobrar</RNText>
               <RNText style={styles.pickerItemSub}>Lo que entró a tu negocio</RNText>
@@ -563,11 +625,11 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.pickerItem, { borderLeftColor: '#E67E22' }]}
+            style={[styles.pickerItem, { borderLeftColor: token.warning.base }]}
             onPress={() => { setShowMoreOptions(false); setActiveModal('costs'); }}
             activeOpacity={0.75}
           >
-            <RNText style={styles.pickerIcon}>🛒</RNText>
+            <Ionicons name="cart-outline" size={22} color={token.warning.base} style={styles.pickerIcon} />
             <View style={styles.pickerTextWrap}>
               <RNText style={styles.pickerItemTitle}>Pagar</RNText>
               <RNText style={styles.pickerItemSub}>Lo que gastaste</RNText>
@@ -575,11 +637,11 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.pickerItem, { borderLeftColor: '#2E86C1' }]}
+            style={[styles.pickerItem, { borderLeftColor: token.info.base }]}
             onPress={() => { setShowMoreOptions(false); setActiveModal('hours'); }}
             activeOpacity={0.75}
           >
-            <RNText style={styles.pickerIcon}>⏱</RNText>
+            <Ionicons name="time-outline" size={22} color={token.info.base} style={styles.pickerIcon} />
             <View style={styles.pickerTextWrap}>
               <RNText style={styles.pickerItemTitle}>Horas trabajadas</RNText>
               <RNText style={styles.pickerItemSub}>El tiempo que le dedicaste</RNText>
@@ -603,7 +665,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
                 onPress={() => { setShowMoreOptions(false); setActiveModal('product'); }}
                 activeOpacity={0.75}
               >
-                <RNText style={styles.pickerIcon}>📦</RNText>
+                <Ionicons name="cube-outline" size={22} color={token.text.secondary} style={styles.pickerIcon} />
                 <View style={styles.pickerTextWrap}>
                   <RNText style={styles.pickerItemTitle}>Agregar producto al catálogo</RNText>
                   <RNText style={styles.pickerItemSub}>Configurar lo que vendés con stock</RNText>
@@ -615,7 +677,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
                 onPress={() => { setShowMoreOptions(false); setActiveModal('movements'); }}
                 activeOpacity={0.75}
               >
-                <RNText style={styles.pickerIcon}>↔️</RNText>
+                <Ionicons name="swap-horizontal-outline" size={22} color={token.text.secondary} style={styles.pickerIcon} />
                 <View style={styles.pickerTextWrap}>
                   <RNText style={styles.pickerItemTitle}>Movimiento extraordinario</RNText>
                   <RNText style={styles.pickerItemSub}>Ingresos o egresos puntuales</RNText>
@@ -638,7 +700,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <Container>
+        <Container maxWidth={isWide ? 1160 : undefined}>
 
           {/* Header — F1-D compacto */}
           <Stack direction="row" align="center" justify="space-between" gap="3" style={{ marginBottom: space['4'] }}>
@@ -658,8 +720,9 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
             </Stack>
 
             <Stack direction="row" align="center" gap="3">
+              {/* D-3: Ionicons reemplaza emojis de chrome (consistencia cross-platform). */}
               <TouchableOpacity onPress={onOpenSettings} activeOpacity={0.7}>
-                <RNText style={styles.settingsIcon}>⚙️</RNText>
+                <Ionicons name="settings-outline" size={20} color={token.text.secondary} />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={async () => { await supabase.auth.signOut(); onSignOut(); }}
@@ -673,7 +736,14 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
               MiPlata + Balance + Ingresos/Costos. Pegado arriba para que el
               usuario entienda que todo lo de abajo responde al mismo reloj. */}
           {detailLevel === 'simple' ? (
-            <View style={{ marginBottom: space['3'] }}>
+            <View
+              style={{
+                marginBottom: space['3'],
+                // D-15: en escritorio el selector no se estira al ancho total
+                // (480px máx, alineado izquierda — patrón chips CoinMarketCap).
+                maxWidth: isWide ? 480 : undefined,
+              }}
+            >
               <SegmentedControl<Period>
                 value={period}
                 onChange={handlePeriodChange}
@@ -682,29 +752,6 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
                   { value: 'week', label: 'Semana' },
                   { value: 'month', label: 'Mes' },
                 ]}
-              />
-            </View>
-          ) : null}
-
-          {/* F1-M.1 — "Mi plata" con composición por canal, arriba en modo
-              simple. Hereda de F1-J.5a el tap-to-pending (atajo directo a
-              MovementForm > Pendientes). El tap en una cuenta abre el historial
-              filtrado por esa cuenta EN EL PERÍODO ACTIVO (no más 'month' fijo)
-              — "¿cuánto cobré en efectivo esta semana?" en dos taps. */}
-          {detailLevel === 'simple' && miPlataSnapshot ? (
-            <View style={{ marginBottom: space['3'] }}>
-              <MiPlataCard
-                snapshot={miPlataSnapshot}
-                onPendingPress={() => setActiveModal('movements')}
-                onChannelPress={(account) =>
-                  onOpenHistory({
-                    type: 'all',
-                    axis: 'channel',
-                    key: account.id,
-                    label: account.name,
-                    period,
-                  })
-                }
               />
             </View>
           ) : null}
@@ -782,7 +829,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  settingsIcon: { fontSize: 20 },
 
   /* Picker */
   pickerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
@@ -816,7 +862,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderLeftColor: '#1C1C30',
   },
-  pickerIcon:        { fontSize: 22, width: 28, textAlign: 'center' },
+  pickerIcon:        { width: 28, textAlign: 'center' },
   pickerTextWrap:    { flex: 1 },
   pickerItemTitle:   { color: '#FFF', fontSize: 14, fontWeight: '600' },
   pickerItemSub:     { color: '#7F8C8D', fontSize: 11, marginTop: 2 },

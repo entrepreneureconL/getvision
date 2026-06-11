@@ -24,7 +24,7 @@ import {
 } from '../schemas/transaction';
 import { resolveCategory } from '../utils/transactionCategories';
 import { toLocalISODate } from '../utils/periods';
-import { PENDING_KEY, UNLABELED_KEY } from '../utils/historyFilters';
+import { ALL_KEY, PENDING_KEY, UNLABELED_KEY } from '../utils/historyFilters';
 import type { BreakdownAxis } from '../schemas/business';
 
 // Columnas mínimas para KPIs (agregaciones income/expense por categoría).
@@ -256,8 +256,10 @@ export const transactionsRepo = {
     if (opts.type === 'income') q = q.eq('type', 'income');
     else if (opts.type === 'expense') q = q.eq('type', 'expense');
 
-    // Axis filter
-    if (opts.axis === 'channel') {
+    // Axis filter — ALL_KEY (D-4, tab Movimientos) = sin filtro de eje.
+    if (opts.key === ALL_KEY) {
+      // no-op: el período + type ya acotan la lista.
+    } else if (opts.axis === 'channel') {
       if (opts.key === PENDING_KEY) {
         q = q.is('settled_at', null);
       } else if (opts.type === 'all') {

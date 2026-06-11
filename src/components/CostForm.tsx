@@ -178,7 +178,7 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction, 
     <View style={styles.overlay}>
       <View style={styles.panel}>
         <View style={styles.panelHeader}>
-          <Text style={styles.panelTitle}>{isEdit ? '✏️ Editar costo' : '🛒 Nuevo Costo'}</Text>
+          <Text style={styles.panelTitle}>{isEdit ? 'Editar costo' : 'Nuevo costo'}</Text>
           <TouchableOpacity onPress={onClose}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
@@ -312,7 +312,7 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction, 
             >
               {deleting
                 ? <ActivityIndicator color="#E74C3C" />
-                : <Text style={styles.deleteBtnText}>🗑 Eliminar costo</Text>
+                : <Text style={styles.deleteBtnText}>Eliminar costo</Text>
               }
             </TouchableOpacity>
           )}

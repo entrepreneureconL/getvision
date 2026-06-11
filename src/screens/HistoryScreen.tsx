@@ -51,7 +51,8 @@ import {
 type Props = {
   businessId: string;
   initialFilter: HistoryFilter;
-  onBack: () => void;
+  /** D-4: opcional — como raíz de la tab Movimientos no hay "volver". */
+  onBack?: () => void;
 };
 
 const AXIS_LABEL: Record<HistoryFilter['axis'], string> = {
@@ -118,13 +119,15 @@ export default function HistoryScreen({
             gap="3"
             style={{ marginBottom: space['4'] }}
           >
-            <TouchableOpacity
-              onPress={onBack}
-              activeOpacity={0.7}
-              style={styles.backHit}
-            >
-              <RNText style={styles.backChevron}>‹</RNText>
-            </TouchableOpacity>
+            {onBack ? (
+              <TouchableOpacity
+                onPress={onBack}
+                activeOpacity={0.7}
+                style={styles.backHit}
+              >
+                <RNText style={styles.backChevron}>‹</RNText>
+              </TouchableOpacity>
+            ) : null}
             <Stack gap="0" style={{ flex: 1 }}>
               <Text variant="micro" color="tertiary" uppercase>
                 {TYPE_LABEL[filter.type]} · {AXIS_LABEL[filter.axis]}

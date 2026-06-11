@@ -27,6 +27,13 @@ export const PENDING_KEY = '__pending';
 export const UNLABELED_KEY = '__unlabeled';
 
 /**
+ * D-4 — key sintética "sin filtro de eje": lista TODO el período.
+ * La usa la tab Movimientos (historial completo). `listForFilter` la
+ * interpreta como "saltear el filtro de axis".
+ */
+export const ALL_KEY = '__all';
+
+/**
  * Tipo del filtro que viaja desde el Dashboard hasta la HistoryScreen.
  *
  *   type:

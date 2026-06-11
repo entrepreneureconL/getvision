@@ -195,7 +195,7 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction, 
       <View style={styles.panel}>
 
         <View style={styles.panelHeader}>
-          <Text style={styles.panelTitle}>{isEdit ? '✏️ Editar venta' : '💵 Nueva Venta'}</Text>
+          <Text style={styles.panelTitle}>{isEdit ? 'Editar venta' : 'Nueva venta'}</Text>
           <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
@@ -329,7 +329,7 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction, 
             >
               {deleting
                 ? <ActivityIndicator color="#E74C3C" />
-                : <Text style={styles.deleteBtnText}>🗑 Eliminar venta</Text>
+                : <Text style={styles.deleteBtnText}>Eliminar venta</Text>
               }
             </TouchableOpacity>
           )}

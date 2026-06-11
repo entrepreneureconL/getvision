@@ -825,14 +825,15 @@ export const analyticsRepo = {
   ): Promise<MiPlataSnapshot> {
     const range = getStockPeriodRange(stockPeriod);
 
+    // Pendientes: SIEMPRE (feedback CEO 2026-06-11). Son stock del presente
+    // ("lo que me deben AHORA") — no dependen del período del selector. Antes
+    // solo se cargaban en 'today' y el dato desaparecía al cambiar a Semana/Mes.
     const [accounts, currentVar, previousVar, balances, pending] = await Promise.all([
       accountsRepo.listActive(businessId),
       accountsRepo.getVariations(businessId, range.start, range.end),
       accountsRepo.getVariations(businessId, range.prevStart, range.prevEnd),
       accountsRepo.getBalances(businessId),
-      stockPeriod === 'today'
-        ? transactionsRepo.listPending(businessId)
-        : Promise.resolve({ receivables: [], payables: [] }),
+      transactionsRepo.listPending(businessId),
     ]);
 
     const variationByAccount: AccountVariation[] = accounts.map(a => ({

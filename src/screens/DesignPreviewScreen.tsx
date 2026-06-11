@@ -24,9 +24,20 @@ import {
   Text,
   Card,
   PeriodBars,
+  TabBar,
   color,
   space,
+  type TabItem,
 } from '../design';
+
+// ── Mock: TabBar (D-4) ──
+type PreviewTab = 'home' | 'movements' | 'stats' | 'profile';
+const PREVIEW_TABS: TabItem<PreviewTab>[] = [
+  { key: 'home',      label: 'Inicio',      icon: 'home-outline',        iconActive: 'home' },
+  { key: 'movements', label: 'Movimientos', icon: 'list-outline',        iconActive: 'list' },
+  { key: 'stats',     label: 'Stats',       icon: 'stats-chart-outline', iconActive: 'stats-chart' },
+  { key: 'profile',   label: 'Perfil',      icon: 'person-outline',      iconActive: 'person' },
+];
 
 // ── Mock: semana con actividad (lunes a hoy=viernes) ──
 const WEEK_SERIES: FlowSeriesPoint[] = [
@@ -89,6 +100,7 @@ const MOCK_FLOW: MonthFlowResult = {
 export default function DesignPreviewScreen() {
   const [incomeAxis, setIncomeAxis] = useState<BreakdownAxis>('channel');
   const [expenseAxis, setExpenseAxis] = useState<BreakdownAxis>('channel');
+  const [previewTab, setPreviewTab] = useState<PreviewTab>('home');
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -145,6 +157,10 @@ export default function DesignPreviewScreen() {
             prevExpense={140000}
             prevLabel="semana pasada"
           />
+        </Section>
+
+        <Section title="TabBar — navegación inferior (D-4, Ionicons)">
+          <TabBar items={PREVIEW_TABS} active={previewTab} onChange={setPreviewTab} />
         </Section>
 
         <Section title="FlowPairSection — par Ingresos/Costos (D-9)">

@@ -35,6 +35,7 @@
 
 import { useState } from 'react';
 import { View, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import type { AccountVariation, MiPlataSnapshot } from '../repos/analytics';
 import type { StockPeriod } from '../utils/periods';
 import { formatMoney, splitMoneyParts } from './Money';
@@ -85,8 +86,12 @@ export default function MiPlataCard({
   const hasPayables = payablesPending > 0;
   const hasAnyPending = hasReceivables || hasPayables;
 
-  // Pendientes/Neto/hint son STOCK del presente — solo encajan en chip 'today'.
-  const showPendingBlock = period === 'today' && hasAnyPending;
+  // Pendientes: SIEMPRE visibles si existen (feedback CEO 2026-06-11 — el dato
+  // se perdía al cambiar de período). Son stock del presente, no del período.
+  const showPendingBlock = hasAnyPending;
+  // El Neto proyectado mezcla variación del período con stock futuro — solo
+  // tiene lectura limpia en 'Hoy' (variación de hoy + lo que entra/sale).
+  const showNetProjected = period === 'today' && hasAnyPending;
 
   // Filtramos cuentas sin variación en el período. Una cuenta con $0 movido
   // no aporta a la lectura ("Banco: $0" no dice nada útil).
@@ -142,9 +147,13 @@ export default function MiPlataCard({
     <Card variant="surface" padding="lg" onPress={cardOnPress}>
       {/* ── Encabezado con chevron de expand ── */}
       <Stack direction="row" justify="space-between" align="center">
-        <Text variant="micro" color="secondary" uppercase>
-          💰  Mi plata · {PERIOD_NOUN[period]}
-        </Text>
+        {/* D-3: Ionicons en lugar de emoji (paridad visual cross-platform). */}
+        <Stack direction="row" align="center" gap="2">
+          <Ionicons name="wallet-outline" size={14} color={color.text.secondary} />
+          <Text variant="micro" color="secondary" uppercase>
+            Mi plata · {PERIOD_NOUN[period]}
+          </Text>
+        </Stack>
         {visibleAccounts.length > 0 ? (
           <TouchableOpacity
             onPress={() => setExpanded(e => !e)}
@@ -159,7 +168,8 @@ export default function MiPlataCard({
       </Stack>
 
       {/* ── Variación neta del período (hero number) ──
-          G-6: decimales atenuados — el ojo va a los enteros. */}
+          G-6: decimales atenuados por tamaño + opacidad, MISMO color que el
+          entero (feedback CEO 2026-06-11 — un dato, un matiz). */}
       <View style={{ marginTop: space['3'] }}>
         <Text style={displayStyle}>
           {variation > 0 ? '+ ' : variation < 0 ? '− ' : ''}
@@ -167,7 +177,7 @@ export default function MiPlataCard({
           <Text
             style={{
               fontSize: Math.round(tokenText.size['5xl'] * 0.5),
-              color: color.text.tertiary,
+              opacity: 0.55,
               fontWeight: tokenText.weight.medium as '500',
             }}
           >
@@ -232,14 +242,17 @@ export default function MiPlataCard({
             </Stack>
           </View>
 
-          <Divider variant="subtle" spacing="3" />
-
-          <Stack direction="row" justify="space-between" align="center">
-            <Text variant="captionStrong" color="secondary">
-              Neto proyectado
-            </Text>
-            <Text style={netValueStyle}>$ {formatMoney(netProjected)}</Text>
-          </Stack>
+          {showNetProjected ? (
+            <>
+              <Divider variant="subtle" spacing="3" />
+              <Stack direction="row" justify="space-between" align="center">
+                <Text variant="captionStrong" color="secondary">
+                  Neto proyectado
+                </Text>
+                <Text style={netValueStyle}>$ {formatMoney(netProjected)}</Text>
+              </Stack>
+            </>
+          ) : null}
 
           {onPendingPress ? (
             <Text
@@ -248,7 +261,7 @@ export default function MiPlataCard({
               align="center"
               style={{ marginTop: space['3'] }}
             >
-              💡 Tap para ver pendientes
+              Tocá para ver pendientes
             </Text>
           ) : null}
         </>

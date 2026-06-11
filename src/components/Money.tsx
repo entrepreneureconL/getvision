@@ -92,14 +92,17 @@ export default function Money({
   }
 
   if (mutedDecimals) {
-    // "(−1.234,56)" se descompone en: "(−1.234" + ",56" chico/apagado + ")".
+    // "(−1.234,56)" se descompone en: "(−1.234" + ",56" chico/atenuado + ")".
+    // Feedback CEO 2026-06-11: los decimales heredan el MISMO color del entero
+    // (verde con verde, no gris) — un dato, un matiz. La atenuación es por
+    // tamaño + opacidad, nunca por cambio de color.
     const { int, dec } = splitMoneyParts(amount);
     const isNegative = amount < 0;
     const flat = StyleSheet.flatten(style) ?? {};
     const baseSize = typeof flat.fontSize === 'number' ? flat.fontSize : 15;
     const decStyle: TextStyle = {
       fontSize: Math.round(baseSize * MUTED_DECIMALS_RATIO),
-      color: dsColor.text.tertiary,
+      opacity: 0.55,
       fontWeight: '500',
     };
     return (
