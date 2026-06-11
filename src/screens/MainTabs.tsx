@@ -101,6 +101,7 @@ export default function MainTabs({
         <HistoryScreen
           key={`${movementsFilter.key}-${movementsFilter.type}-${movementsFilter.label}`}
           businessId={businessId}
+          rubro={business.rubro ?? null}
           initialFilter={movementsFilter}
           onBack={
             movementsFilter.key === ALL_KEY

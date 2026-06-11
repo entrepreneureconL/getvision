@@ -14,10 +14,11 @@
  *     dashboard) pero la pantalla deja al usuario expandirlo (Día/Semana/Mes).
  *   - Lista: TransactionList sin límite con los items del filtro.
  *
- * Nota sobre edit:
- *   No habilitamos `onItemPress` para editar desde acá — abrir el editor desde
- *   una pantalla 2 niveles profunda complica el back-nav y la app aún no
- *   soporta el patrón. Para editar, el usuario vuelve al dashboard.
+ * Edición (pedido CEO 2026-06-11): tap en un item abre SaleForm/CostForm en
+ * modo edit, igual que en el Dashboard. La restricción original ("pantalla 2
+ * niveles profunda complica el back-nav") quedó obsoleta con D-4 — Movimientos
+ * es una tab de primer nivel. Extraordinarios siguen no editables (misma
+ * limitación que el Dashboard — rediseño de MovementForm pendiente, D-14).
  */
 
 import { useEffect, useState, useCallback } from 'react';
@@ -38,6 +39,8 @@ import type { CategoryOverride } from '../schemas/categoryOverride';
 import { formatMoney } from '../components/Money';
 import Container from '../components/Container';
 import TransactionList from '../components/TransactionList';
+import SaleForm from '../components/SaleForm';
+import CostForm from '../components/CostForm';
 import {
   Heading,
   Text,
@@ -53,6 +56,8 @@ type Props = {
   initialFilter: HistoryFilter;
   /** D-4: opcional — como raíz de la tab Movimientos no hay "volver". */
   onBack?: () => void;
+  /** Para las sugerencias contextuales de AddCategoryModal en los forms. */
+  rubro?: string | null;
 };
 
 const AXIS_LABEL: Record<HistoryFilter['axis'], string> = {
@@ -70,11 +75,15 @@ export default function HistoryScreen({
   businessId,
   initialFilter,
   onBack,
+  rubro = null,
 }: Props) {
   const [filter, setFilter] = useState<HistoryFilter>(initialFilter);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [overrides, setOverrides] = useState<CategoryOverride[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Edición (pedido CEO 2026-06-11) — mismo patrón que DashboardScreen. */
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [activeForm, setActiveForm] = useState<null | 'sales' | 'costs'>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,6 +107,25 @@ export default function HistoryScreen({
 
   const handlePeriodChange = (next: Period) => {
     setFilter(prev => ({ ...prev, period: next }));
+  };
+
+  /** Tap en item → editar. Solo income/expense regulares (igual que Dashboard). */
+  const handleItemPress = (t: Transaction) => {
+    if (t.type === 'income') {
+      setEditingTransaction(t);
+      setActiveForm('sales');
+    } else if (t.type === 'expense') {
+      setEditingTransaction(t);
+      setActiveForm('costs');
+    }
+    // extraordinarios: no-op hasta D-14.
+  };
+
+  /** Cierre de form con guardado/borrado → recargar la lista filtrada. */
+  const handleFormSuccess = () => {
+    setActiveForm(null);
+    setEditingTransaction(null);
+    load();
   };
 
   // Sub-info: count + suma. Sum se calcula localmente (la lista ya viene
@@ -173,12 +201,32 @@ export default function HistoryScreen({
                 transactions={transactions}
                 emptyMessage="Sin movimientos para este filtro y período."
                 categoryOverrides={overrides}
-                // No habilitamos onItemPress — ver doc del componente arriba.
+                onItemPress={handleItemPress}
               />
             )}
           </View>
         </Container>
       </ScrollView>
+
+      {/* ── Forms de edición (pedido CEO 2026-06-11) ── */}
+      {activeForm === 'sales' && editingTransaction && (
+        <SaleForm
+          businessId={businessId}
+          rubro={rubro}
+          transaction={editingTransaction}
+          onSuccess={handleFormSuccess}
+          onClose={() => { setActiveForm(null); setEditingTransaction(null); }}
+        />
+      )}
+      {activeForm === 'costs' && editingTransaction && (
+        <CostForm
+          businessId={businessId}
+          rubro={rubro}
+          transaction={editingTransaction}
+          onSuccess={handleFormSuccess}
+          onClose={() => { setActiveForm(null); setEditingTransaction(null); }}
+        />
+      )}
     </SafeAreaView>
   );
 }
