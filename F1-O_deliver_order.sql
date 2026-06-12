@@ -38,6 +38,16 @@
 -- ─────────────────────────────────────────────────────────────────────────
 -- PASO 1 — RPC atómica deliver_order
 -- ─────────────────────────────────────────────────────────────────────────
+-- NOTA (incidente 2026-06-12): la primera versión usaba `SELECT * INTO
+-- v_order` (plpgsql). El SQL Editor de Supabase lo confunde con el
+-- SELECT INTO de SQL plano (que crea una tabla) y le INYECTA un
+-- "ALTER TABLE v_order ENABLE ROW LEVEL SECURITY" adentro del cuerpo
+-- $$...$$, rompiendo el script con 42601 (unterminated dollar-quoted
+-- string). Por eso esta versión evita SELECT...INTO: el UPDATE con guard
+-- hace el lock atómico él solo (de dos callers en paralelo, uno matchea
+-- status='pending' y el otro afecta 0 filas) y RETURNING...INTO no
+-- dispara la heurística del editor.
+
 CREATE OR REPLACE FUNCTION public.deliver_order(
   p_order_id     UUID,
   p_paid         BOOLEAN,
@@ -47,10 +57,12 @@ CREATE OR REPLACE FUNCTION public.deliver_order(
 RETURNS TABLE (order_id UUID, transaction_id UUID)
 LANGUAGE plpgsql
 SECURITY INVOKER
-AS $$
+AS $fn$
 DECLARE
-  v_order public.orders%ROWTYPE;
-  v_tx_id UUID;
+  v_business_id UUID;
+  v_amount      NUMERIC;
+  v_description TEXT;
+  v_tx_id       UUID;
 BEGIN
   IF p_delivered_on IS NULL THEN
     RAISE EXCEPTION 'DELIVERED_ON_REQUIRED';
@@ -59,11 +71,14 @@ BEGIN
     RAISE EXCEPTION 'ACCOUNT_REQUIRED';
   END IF;
 
-  -- Lock + guard atómico (R2). Un id ajeno no pasa la RLS → NOT FOUND (R4).
-  SELECT * INTO v_order
-  FROM public.orders
+  -- Lock + guard atómico en el propio UPDATE (R2). Un id ajeno no pasa
+  -- la RLS → 0 filas → NOT FOUND (R4). Si algo falla después (cuenta
+  -- inválida, insert), TODO se revierte — el pedido no queda 'delivered'.
+  UPDATE public.orders
+  SET status = 'delivered'
   WHERE id = p_order_id AND status = 'pending'
-  FOR UPDATE;
+  RETURNING business_id, amount, description
+  INTO v_business_id, v_amount, v_description;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'ORDER_NOT_PENDING';
@@ -74,7 +89,7 @@ BEGIN
   IF p_paid THEN
     PERFORM 1 FROM public.accounts
     WHERE id = p_account_id
-      AND business_id = v_order.business_id
+      AND business_id = v_business_id
       AND archived_at IS NULL;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'ACCOUNT_INVALID';
@@ -88,20 +103,20 @@ BEGIN
     (business_id, type, amount, date, category, description,
      status, settled_at, to_account_id)
   VALUES
-    (v_order.business_id, 'income', v_order.amount, p_delivered_on,
-     'pedido', v_order.description,
+    (v_business_id, 'income', v_amount, p_delivered_on,
+     'pedido', v_description,
      CASE WHEN p_paid THEN 'completed' ELSE 'pending' END,
      CASE WHEN p_paid THEN p_delivered_on END,
      CASE WHEN p_paid THEN p_account_id END)
   RETURNING id INTO v_tx_id;
 
   UPDATE public.orders
-  SET status = 'delivered', transaction_id = v_tx_id
+  SET transaction_id = v_tx_id
   WHERE id = p_order_id;
 
   RETURN QUERY SELECT p_order_id, v_tx_id;
 END;
-$$;
+$fn$;
 
 GRANT EXECUTE ON FUNCTION public.deliver_order(UUID, BOOLEAN, UUID, DATE) TO authenticated;
 
