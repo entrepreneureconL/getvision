@@ -80,7 +80,11 @@ export default function MiPlataCard({
     delta,
     period,
     prevLabel,
+    rangeLabel,
   } = snapshot;
+
+  // F1-O / D-19.b — header: noun fijo por chip, o el label del rango custom.
+  const periodNoun = period === 'custom' ? (rangeLabel ?? 'del rango') : PERIOD_NOUN[period];
 
   const hasReceivables = receivablesPending > 0;
   const hasPayables = payablesPending > 0;
@@ -151,7 +155,7 @@ export default function MiPlataCard({
         <Stack direction="row" align="center" gap="2">
           <Ionicons name="wallet-outline" size={14} color={color.text.secondary} />
           <Text variant="micro" color="secondary" uppercase>
-            Mi plata · {PERIOD_NOUN[period]}
+            Mi plata · {periodNoun}
           </Text>
         </Stack>
         {visibleAccounts.length > 0 ? (

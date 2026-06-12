@@ -31,10 +31,10 @@ import { businessesRepo } from '../repos/businesses';
 import { transactionsRepo, type DashboardKPIs } from '../repos/transactions';
 import { productsRepo, type StockSummary } from '../repos/products';
 import { hoursLogRepo, type HoursSummary } from '../repos/hoursLog';
-import { analyticsRepo, type MetricResultWithPeriod, type MetricMeta, type MiPlataSnapshot, type MonthFlowResult } from '../repos/analytics';
+import { analyticsRepo, type MetricResultWithPeriod, type MetricMeta, type MiPlataSnapshot, type MonthFlowResult, type CalendarDay } from '../repos/analytics';
 import { categoriesRepo } from '../repos/categories';
 import type { CategoryOverride } from '../schemas/categoryOverride';
-import { todayLocalISO, type Period, type StockPeriod } from '../utils/periods';
+import { resolveRange, todayLocalISO, type Period, type StockPeriod, type DashboardRange } from '../utils/periods';
 import type { HistoryFilter } from '../utils/historyFilters';
 import {
   getContextualHint,
@@ -71,7 +71,9 @@ import {
   Heading,
   Text,
   Stack,
+  Card,
   SegmentedControl,
+  CalendarMonth,
   color as token,
   space,
   radius,
@@ -167,6 +169,10 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   const [activeModal, setActiveModal]         = useState<Modal_>(null);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [period, setPeriod]                   = useState<Period>('month');
+  /** F1-O / D-19.b — rango custom del calendario. null = gobierna el chip `period`. */
+  const [customRange, setCustomRange]         = useState<{ start: string; end: string } | null>(null);
+  /** F1-O / D-19 — agregado del mes calendario para el widget <CalendarMonth/>. */
+  const [calendarDays, setCalendarDays]       = useState<CalendarDay[]>([]);
   /** F1-D Task #11: si está seteada, los forms se abren en modo edit. */
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   /** D-5 — keys de hints descartados en ESTA sesión (sin persistencia v1). */
@@ -200,21 +206,32 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
     [recentTransactions],
   );
 
+  // F1-O / D-19.b — qué resalta el calendario: el rango custom si está activo, o
+  // el reflejo del chip (día/semana). 'Mes' = sin banda (estado default suave).
+  const calendarSelection = useMemo(() => {
+    if (customRange) return customRange;
+    if (period === 'month') return null;
+    const r = resolveRange(period);
+    return { start: r.start, end: r.end };
+  }, [customRange, period]);
+
   /** Carga selectiva: hero + meta para un período específico. Liviano. */
   const loadHeroForPeriod = useCallback(async (biz: Business, p: Period) => {
     const hero = await analyticsRepo.getHeroMetricForPeriod(biz, p);
     setHeroMetric(hero);
   }, []);
 
-  /** F1-M.2 — Carga selectiva del MonthFlow para un período. */
-  const loadFlowForPeriod = useCallback(async (biz: Business, p: Period) => {
-    const flow = await analyticsRepo.getMonthFlow(biz.id, p);
+  /**
+   * F1-M.2 + F1-O/D-19.b — Carga selectiva de Flow + MiPlata para la selección
+   * activa: un chip (Period) o un rango custom del calendario (DashboardRange).
+   * Para el chip, MiPlata usa su StockPeriod; para el rango, ambos toman el rango.
+   */
+  const loadSelection = useCallback(async (biz: Business, sel: Period | DashboardRange) => {
+    const [flow, snap] = await Promise.all([
+      analyticsRepo.getMonthFlow(biz.id, sel),
+      analyticsRepo.getMiPlataSnapshot(biz.id, typeof sel === 'string' ? STOCK_OF[sel] : sel),
+    ]);
     setMonthFlow(flow);
-  }, []);
-
-  /** F1-M Fase B — Carga selectiva del snapshot MiPlata para un stockPeriod. */
-  const loadMiPlataForPeriod = useCallback(async (biz: Business, sp: StockPeriod) => {
-    const snap = await analyticsRepo.getMiPlataSnapshot(biz.id, sp);
     setMiPlataSnapshot(snap);
   }, []);
 
@@ -248,7 +265,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
       // del hero metric ("4 ventas") no coincidía con lo visible.
       const recentLimit = 10;
 
-      const [monthKPIs, stockSummary, hoursSummary, hero, recent, snap, overrides, flow] = await Promise.all([
+      const [monthKPIs, stockSummary, hoursSummary, hero, recent, snap, overrides, flow, calDays] = await Promise.all([
         needKPIs ? transactionsRepo.getKPIsForCurrentMonth(biz.id) : Promise.resolve(EMPTY_KPIS),
         needStock ? productsRepo.getStockSummary(biz.id) : Promise.resolve(EMPTY_STOCK),
         needHours ? hoursLogRepo.getSummaryForCurrentMonth(biz.id) : Promise.resolve(EMPTY_HOURS),
@@ -257,6 +274,8 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
         analyticsRepo.getMiPlataSnapshot(biz.id, STOCK_OF[period]),  // F1-M Fase B + G-1
         categoriesRepo.listForBusiness(biz.id),  // F1-L
         needFlow ? analyticsRepo.getMonthFlow(biz.id, period) : Promise.resolve(null),  // F1-M.2
+        // F1-O / D-19 — mes calendario completo (solo simple, donde vive el widget).
+        needFlow ? analyticsRepo.getCalendarMonth(biz.id, todayLocalISO()) : Promise.resolve([] as CalendarDay[]),
       ]);
 
       setKpis(monthKPIs);
@@ -267,6 +286,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
       setMiPlataSnapshot(snap);
       setCategoryOverrides(overrides);
       setMonthFlow(flow);
+      setCalendarDays(calDays);
 
       // F1-M.2 — sincronizar ejes con la preferencia del business.
       setIncomeAxis(getIncomeBreakdownAxis(biz));
@@ -283,13 +303,28 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
    *  MiPlata en simple, hero en detailed. Un reloj, todo sincronizado. */
   const handlePeriodChange = (next: Period) => {
     setPeriod(next);
+    setCustomRange(null);  // G-1: un solo reloj — el chip limpia el rango del calendario.
     if (!business) return;
     const detail = getDetailLevel(business);
     if (detail === 'detailed') loadHeroForPeriod(business, next);
-    if (detail === 'simple') {
-      loadFlowForPeriod(business, next);
-      loadMiPlataForPeriod(business, STOCK_OF[next]);
-    }
+    if (detail === 'simple') loadSelection(business, next);
+  };
+
+  /**
+   * F1-O / D-19.b — tap en un día del calendario. Máquina tap-tap: sin rango (o
+   * con rango ya armado) → día único; con día único previo → segundo tap arma el
+   * rango ordenado. El rango custom gobierna Mi Plata + Balance/flujo vía
+   * resolveRange, y des-selecciona los chips (el calendario NO es un 2º reloj).
+   */
+  const handleCalendarDayPress = (date: string) => {
+    const next = !customRange || customRange.start !== customRange.end
+      ? { start: date, end: date }
+      : customRange.start <= date
+        ? { start: customRange.start, end: date }
+        : { start: date, end: customRange.start };
+    setCustomRange(next);
+    if (business) loadSelection(business, resolveRange(next));
+    // TODO 1D: telemetría calendar_filter ({ kind: next.start === next.end ? 'day' : 'range' }).
   };
 
   /**
@@ -320,6 +355,9 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
     setActiveModal(null);
     setShowMoreOptions(false);
     setEditingTransaction(null);
+    // F1-O: la memo del calendario es estable por mes → invalidar tras una
+    // escritura para que loadDashboardData traiga los agregados frescos.
+    if (businessId) analyticsRepo.invalidateCalendarMonth(businessId);
     loadDashboardData();
   };
 
@@ -501,6 +539,31 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   // dos columnas en escritorio (referencia CoinMarketCap — feedback CEO).
   // Mismos componentes, misma data; cambia solo la disposición.
 
+  // F1-O / D-19 — widget calendario (escritorio; móvil colapsable = 1D).
+  const renderCalendar = () => (
+    <Card variant="surface" padding="lg">
+      <CalendarMonth
+        anchor={todayLocalISO()}
+        today={todayLocalISO()}
+        days={calendarDays}
+        selection={calendarSelection}
+        onDayPress={handleCalendarDayPress}
+      />
+      {customRange ? (
+        <Stack direction="row" justify="space-between" align="center" style={{ marginTop: space['3'] }}>
+          <Text variant="caption" color="secondary">{resolveRange(customRange).label}</Text>
+          <TouchableOpacity
+            onPress={() => handlePeriodChange('month')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+          >
+            <Text variant="caption" color="accent">Limpiar ✕</Text>
+          </TouchableOpacity>
+        </Stack>
+      ) : null}
+    </Card>
+  );
+
   const renderMiPlata = () =>
     miPlataSnapshot ? (
       <MiPlataCard
@@ -609,6 +672,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
           }}
         >
           <Stack gap="3" style={{ flex: 5 }}>
+            {renderCalendar()}
             {renderMiPlata()}
             {renderFlowPair()}
           </Stack>
@@ -805,7 +869,9 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
               }}
             >
               <SegmentedControl<Period>
-                value={period}
+                // F1-O/D-19.b: con rango custom activo, ningún chip queda activo
+                // (value fuera de options = sin highlight) — preserva G-1.
+                value={customRange ? ('' as Period) : period}
                 onChange={handlePeriodChange}
                 options={[
                   { value: 'day', label: 'Hoy' },

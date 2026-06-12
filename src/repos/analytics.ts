@@ -32,12 +32,14 @@ import {
 import {
   getPeriodRange,
   getStockPeriodRange,
+  resolveRange,
   parseLocalISODate,
   toLocalISODate,
   todayLocalISO,
   type Period,
   type PeriodRange,
   type StockPeriod,
+  type DashboardRange,
 } from '../utils/periods';
 import { supabase } from '../lib/supabase';
 import {
@@ -281,8 +283,11 @@ export type MiPlataSnapshot = {
   pendingCount: { receivables: number; payables: number };
   currentLiquidNow: number;
   delta: { amount: number; percent: number | null };
-  period: StockPeriod;
+  /** F1-O / D-19.b — 'custom' cuando el período viene de un rango del calendario. */
+  period: StockPeriod | 'custom';
   prevLabel: string;
+  /** Label del rango actual; solo poblado cuando period === 'custom'. */
+  rangeLabel?: string;
 };
 
 // Defaults para Promise.all selectivo (cuando una métrica no necesita cierto data).
@@ -579,10 +584,10 @@ function buildFlowBlock(
  */
 function buildFlowSeries(
   transactions: Transaction[],
-  period: Period,
-  range: PeriodRange,
+  seriesKind: Period | 'custom',
+  range: Pick<PeriodRange, 'start' | 'end'>,
 ): FlowSeriesPoint[] {
-  if (period === 'year') {
+  if (seriesKind === 'year') {
     const MONTH_INITIALS = ['E', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
     const incomeByMonth = new Array(12).fill(0);
     const expenseByMonth = new Array(12).fill(0);
@@ -626,9 +631,11 @@ function buildFlowSeries(
   let iso = toLocalISODate(cursor);
   while (iso <= last) {
     let label = '';
-    if (period === 'week') label = WEEKDAY_INITIALS[cursor.getDay()];
-    else if (period === 'day') label = 'Hoy';
+    if (seriesKind === 'week') label = WEEKDAY_INITIALS[cursor.getDay()];
+    else if (seriesKind === 'day') label = 'Hoy';
     else {
+      // 'month' | 'custom' — número de día espaciado (1, 5, 10, …) para un eje
+      // respirable. El rango custom del calendario vive dentro de un mes (≤31d).
       const dayNum = cursor.getDate();
       if (dayNum === 1 || dayNum % 5 === 0) label = String(dayNum);
     }
@@ -788,9 +795,13 @@ export const analyticsRepo = {
    */
   async getMonthFlow(
     businessId: string,
-    period: Period,
+    input: Period | DashboardRange,
   ): Promise<MonthFlowResult> {
-    const range = getPeriodRange(period);
+    // F1-O / D-19.b — acepta un chip (Period) o un rango custom del calendario.
+    // Los chips delegan en resolveRange (= getPeriodRange) → cero cambio de
+    // comportamiento; el calendario pasa un DashboardRange.
+    const range = typeof input === 'string' ? resolveRange(input) : input;
+    const seriesKind: Period | 'custom' = typeof input === 'string' ? input : 'custom';
 
     const [currentTx, previousTx, accounts, overrides] = await Promise.all([
       transactionsRepo.listForFlowByRange(businessId, range.start, range.end),
@@ -806,11 +817,11 @@ export const analyticsRepo = {
       expense: buildFlowBlock(currentTx, previousTx, 'expense', accountById, overrides),
       prevLabel: range.prevLabel,
       // D-2 — serie para <PeriodBars/>. Computada de las tx ya fetcheadas.
-      series: buildFlowSeries(currentTx, period, range),
+      series: buildFlowSeries(currentTx, seriesKind, range),
       // D-6: para 'year' las barras son MENSUALES → el promedio de referencia
       // también (total ingresos año anterior / 12), no el diario.
       prevDailyAvgIncome:
-        period === 'year'
+        seriesKind === 'year'
           ? previousTx
               .filter(t => t.type === 'income')
               .reduce((s, t) => s + t.amount, 0) / 12
@@ -880,9 +891,12 @@ export const analyticsRepo = {
    */
   async getMiPlataSnapshot(
     businessId: string,
-    stockPeriod: StockPeriod,
+    input: StockPeriod | DashboardRange,
   ): Promise<MiPlataSnapshot> {
-    const range = getStockPeriodRange(stockPeriod);
+    // F1-O / D-19.b — chip (StockPeriod) o rango custom del calendario. Las
+    // variaciones ya se piden por fechas explícitas, así que generalizar es
+    // solo resolver el rango de entrada.
+    const range = typeof input === 'string' ? getStockPeriodRange(input) : input;
 
     // Pendientes: SIEMPRE (feedback CEO 2026-06-11). Son stock del presente
     // ("lo que me deben AHORA") — no dependen del período del selector. Antes
@@ -929,8 +943,9 @@ export const analyticsRepo = {
       },
       currentLiquidNow,
       delta: { amount: deltaAmount, percent: deltaPercent },
-      period: stockPeriod,
+      period: typeof input === 'string' ? input : 'custom',
       prevLabel: range.prevLabel,
+      rangeLabel: typeof input === 'string' ? undefined : input.label,
     };
   },
 
