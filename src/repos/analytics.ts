@@ -229,9 +229,10 @@ export type FlowSeriesPoint = {
  * el MES CALENDARIO COMPLETO e independiente del filtro activo: si el usuario
  * filtra "hoy", los puntos del resto del mes no pueden desaparecer (§4.7).
  *
- * `ordersCount` viaja en el tipo desde ya (para que el front pinte marcas de
- * pedidos sin re-trabajo), pero el RPC de Fase 1 es SOLO-PLATA → llega en 0
- * hasta que Fase 2 (entidad `orders`) extienda `get_calendar_month`.
+ * `ordersCount` (Etapa 2A.2): pedidos PENDIENTES con entrega ese día — el
+ * único dato que puede vivir en días futuros (compromiso, no plata; la
+ * distinción visual la hace el widget). Los entregados no cuentan: ya son
+ * puntos de plata vía su venta.
  */
 export type CalendarDay = {
   date: string;
@@ -962,7 +963,8 @@ export const analyticsRepo = {
    * mes no. Llamar `invalidateCalendarMonth(businessId)` tras guardar/editar/
    * saldar para refrescar (lo cablea la integración D-19.b).
    *
-   * Fase 1 = solo plata → `ordersCount` viene en 0. Fase 2 extiende el RPC.
+   * Etapa 2A.2: el RPC v2 suma `orders_count` (pedidos pending por día de
+   * entrega). Las mutaciones de ordersRepo invalidan esta caché.
    *
    * @param anchor 'YYYY-MM-DD' — cualquier fecha del mes a traer.
    */
@@ -982,15 +984,19 @@ export const analyticsRepo = {
     }
 
     // DECIMAL puede volver como string desde Postgres — coercer (TECH §11).
+    // orders_count llega desde get_calendar_month v2 (Etapa 2A.2). El `?? 0`
+    // tolera la RPC v1 durante la ventana de aplicación de la migration (R6:
+    // el DROP+recreate no es instantáneo respecto del deploy del código).
     const rows = ((data ?? []) as Array<{
       date: string;
       income: number | string;
       expense: number | string;
+      orders_count?: number | string;
     }>).map(r => ({
       date: r.date,
       income: Number(r.income),
       expense: Number(r.expense),
-      ordersCount: 0, // Fase 2: el RPC sumará orders_count por día.
+      ordersCount: Number(r.orders_count ?? 0),
     }));
 
     calendarMonthCache.set(cacheKey, rows);

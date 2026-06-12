@@ -28,6 +28,15 @@ import {
 } from '../schemas/order';
 import { parseLocalISODate, toLocalISODate, todayLocalISO } from '../utils/periods';
 import { eventsRepo } from './events';
+import { analyticsRepo } from './analytics';
+
+export type DeliverOrderResult =
+  | { ok: true; transactionId: string }
+  | {
+      ok: false;
+      code: 'not_pending' | 'account_required' | 'account_invalid' | 'rls' | 'unknown';
+      message: string;
+    };
 
 export type OrderWriteResult =
   | { ok: true; order: Order }
@@ -137,6 +146,8 @@ export const ordersRepo = {
       has_time: order.delivery_time != null,
       days_ahead: daysAhead(order.delivery_date),
     });
+    // El día de entrega ganó una marca de pedido → refrescar el mes.
+    analyticsRepo.invalidateCalendarMonth(order.business_id);
     return { ok: true, order };
   },
 
@@ -144,8 +155,10 @@ export const ordersRepo = {
    * Edita un pedido 'pending'. El guard de estado va en el WHERE: si el
    * pedido ya se entregó/canceló (en otra pestaña, otro device), la edición
    * afecta 0 filas y devolvemos 'not_pending' — nunca éxito silencioso.
+   * businessId solo se usa para invalidar la caché del calendario (editar
+   * la fecha de entrega mueve la marca de día).
    */
-  async update(id: string, patch: OrderPatch): Promise<OrderMutationResult> {
+  async update(id: string, businessId: string, patch: OrderPatch): Promise<OrderMutationResult> {
     const parsed = OrderPatchSchema.safeParse(patch);
     if (!parsed.success) {
       console.warn('[repo:orders] update patch inválido:', parsed.error.issues);
@@ -171,6 +184,7 @@ export const ordersRepo = {
         message: 'Este pedido ya no se puede editar (¿se entregó o canceló?).',
       };
     }
+    analyticsRepo.invalidateCalendarMonth(businessId);
     return { ok: true };
   },
 
@@ -200,10 +214,78 @@ export const ordersRepo = {
     }
 
     eventsRepo.track(businessId, 'order_cancelled');
+    analyticsRepo.invalidateCalendarMonth(businessId);
     return { ok: true };
   },
 
-  // deliver(id, { paid, accountId, deliveredOn }) llega en Fase 2A.2 junto
-  // con la RPC `deliver_order` — la conversión atómica pedido→transaction
-  // NO se implementa en cliente a propósito (riesgo R1/R2 del plan).
+  /**
+   * Entrega un pedido — LA conversión pedido→venta (Fase 2A.2).
+   *
+   * Va por la RPC atómica `deliver_order`: crear la transaction income y
+   * marcar el pedido 'delivered' ocurren en UNA transacción Postgres (R1).
+   * El lock + guard en DB garantiza que doble tap / dos devices producen
+   * exactamente UNA venta (R2). NO implementar esto con dos writes desde
+   * acá — es el motivo de existencia de la RPC.
+   *
+   * "¿Te pagaron?":
+   *   paid=true  → settled_at = deliveredOn + cuenta destino (plata en cuenta)
+   *   paid=false → settled_at NULL → cae al flujo Por Cobrar de F1-J
+   *
+   * deliveredOn: SIEMPRE todayLocalISO() del call site — la RPC no fecha
+   * sola porque CURRENT_DATE del server es UTC (R3 / LESSONS #2).
+   */
+  async deliver(
+    id: string,
+    businessId: string,
+    opts: { paid: boolean; accountId?: string; deliveredOn: string },
+  ): Promise<DeliverOrderResult> {
+    const { data, error } = await supabase.rpc('deliver_order', {
+      p_order_id: id,
+      p_paid: opts.paid,
+      p_account_id: opts.accountId ?? null,
+      p_delivered_on: opts.deliveredOn,
+    });
+
+    if (error) {
+      // La RPC señala fallas con RAISE EXCEPTION de código propio (R4):
+      // el message llega con el texto del RAISE. Mapeamos a codes accionables.
+      const msg = error.message ?? '';
+      if (msg.includes('ORDER_NOT_PENDING')) {
+        return {
+          ok: false,
+          code: 'not_pending',
+          message: 'Este pedido ya se entregó o canceló. Actualizá la lista.',
+        };
+      }
+      if (msg.includes('ACCOUNT_REQUIRED')) {
+        return {
+          ok: false,
+          code: 'account_required',
+          message: 'Elegí a qué cuenta entró la plata.',
+        };
+      }
+      if (msg.includes('ACCOUNT_INVALID')) {
+        return {
+          ok: false,
+          code: 'account_invalid',
+          message: 'Esa cuenta no es válida para este negocio.',
+        };
+      }
+      console.error('[repo:orders] deliver error:', error);
+      return { ok: false, ...classifyError(error) };
+    }
+
+    // RETURNS TABLE llega como array de filas.
+    const row = Array.isArray(data) ? data[0] : data;
+    const txId: unknown = row?.transaction_id;
+    if (typeof txId !== 'string') {
+      console.error('[repo:orders] deliver respuesta inesperada:', data);
+      return { ok: false, code: 'unknown', message: 'La entrega no se pudo confirmar.' };
+    }
+
+    eventsRepo.track(businessId, 'order_delivered', { paid: opts.paid });
+    // El día perdió la marca de pedido y ganó punto de plata → refrescar.
+    analyticsRepo.invalidateCalendarMonth(businessId);
+    return { ok: true, transactionId: txId };
+  },
 };
