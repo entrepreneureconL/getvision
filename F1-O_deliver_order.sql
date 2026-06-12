@@ -2,57 +2,58 @@
 -- ║  F1-O Etapa 2A.2 — RPC `deliver_order` + `get_calendar_month` v2       ║
 -- ║  Junio 2026 · P-011 · plan F1-O_ETAPA2_PLAN.md (riesgos R1-R6)         ║
 -- ║                                                                        ║
--- ║  Por qué existe:                                                       ║
--- ║   "Entregar" son DOS escrituras (crear la venta + marcar el pedido).   ║
--- ║   Hechas desde el cliente, una caída de red entre ambas deja plata     ║
--- ║   invisible o duplicada (R1). Acá es UNA transacción Postgres: todo    ║
--- ║   o nada.                                                              ║
+-- ║  ⚠ CÓMO APLICAR (importante — 2 incidentes con el SQL Editor):         ║
+-- ║   El editor del dashboard rompe los cuerpos $...$ de funciones si      ║
+-- ║   contienen comentarios o líneas en blanco (corta el statement e       ║
+-- ║   inyecta cosas — errores 42601 vistos el 2026-06-12). Por eso:        ║
+-- ║   1. Los cuerpos de las funciones van SIN comentarios NI líneas en     ║
+-- ║      blanco — toda la explicación está AFUERA, acá arriba.             ║
+-- ║   2. Correr CADA PASO en una query nueva del editor, por separado      ║
+-- ║      (copiar/pegar solo el bloque del paso, sin los comentarios).      ║
 -- ║                                                                        ║
--- ║  Diseño:                                                               ║
--- ║   - SECURITY INVOKER: RLS del usuario aplica a orders Y transactions.  ║
--- ║   - SELECT ... FOR UPDATE + guard status='pending': doble tap o dos    ║
--- ║     devices en paralelo → exactamente UNA venta; el segundo recibe     ║
--- ║     ORDER_NOT_PENDING (R2, LESSONS #5: la garantía vive en DB).        ║
--- ║   - p_delivered_on viene del CLIENTE (todayLocalISO). CURRENT_DATE     ║
--- ║     acá es UTC: a las 21:00+ de Buenos Aires ya es "mañana" (R3,       ║
--- ║     cara server-side de LESSONS #2).                                   ║
--- ║   - RAISE EXCEPTION con códigos propios: un id ajeno (RLS) o un        ║
--- ║     estado inválido NUNCA devuelven éxito silencioso (R4, LESSONS #3). ║
--- ║   - La venta resultante es indistinguible de una venta normal:         ║
--- ║     cobrada → settled_at + cuenta; no cobrada → settled_at NULL =      ║
--- ║     cae al flujo Por Cobrar de F1-J. Cero cambios en KPIs/MiPlata.     ║
+-- ║  Qué hace deliver_order (todo o nada — R1):                            ║
+-- ║   1. Valida fecha (viene del cliente: CURRENT_DATE del server es UTC,  ║
+-- ║      R3) y cuenta (obligatoria si p_paid).                             ║
+-- ║   2. UPDATE con guard status='pending': lock atómico — de dos callers  ║
+-- ║      en paralelo solo uno matchea; el otro afecta 0 filas y recibe     ║
+-- ║      ORDER_NOT_PENDING (R2). Un id ajeno no pasa la RLS → idem (R4).   ║
+-- ║      Devuelve business_id/amount/description vía RETURNING...INTO      ║
+-- ║      (SELECT...INTO está PROHIBIDO acá: el editor lo confunde con      ║
+-- ║      creación de tabla e inyecta un ALTER TABLE adentro del cuerpo).   ║
+-- ║   3. Valida que la cuenta sea del MISMO business y no esté archivada   ║
+-- ║      (ACCOUNT_INVALID). Si falla, TODO se revierte: el pedido NO       ║
+-- ║      queda 'delivered'.                                                ║
+-- ║   4. INSERT de la venta: cobrada → settled_at + cuenta; no cobrada →   ║
+-- ║      settled_at NULL = flujo Por Cobrar de F1-J. date = fecha de       ║
+-- ║      ENTREGA (devengado). status legacy coherente (ADR #26).           ║
+-- ║   5. Vincula transaction_id al pedido y devuelve ambos ids.            ║
 -- ║                                                                        ║
--- ║  get_calendar_month v2: cambiar el RETURNS exige DROP + recrear (R6 —  ║
--- ║  OR REPLACE no puede cambiar la firma). El código en producción ya     ║
--- ║  tolera ambas versiones (ordersCount default 0) y degrada a calendario ║
--- ║  sin puntos si la RPC falla durante la ventana de aplicación.          ║
+-- ║  Qué hace get_calendar_month v2:                                       ║
+-- ║   Igual que v1 (plata por día del mes, sin _extraordinary, sin plata   ║
+-- ║   en días futuros — ADR #20/paridad cards) + orders_count = pedidos    ║
+-- ║   PENDING por delivery_date (compromiso, no plata: SÍ vive en días     ║
+-- ║   futuros; los entregados ya cuentan como plata vía su venta).         ║
+-- ║   Cambiar el RETURNS exige DROP + recrear (R6): el código en           ║
+-- ║   producción ya tolera ambas versiones (ordersCount default 0).        ║
 -- ╚═══════════════════════════════════════════════════════════════════════╝
 
 -- ─────────────────────────────────────────────────────────────────────────
--- PASO 0 — Verificación PRE
+-- PASO 0 — Verificación PRE (query propia)
 -- ─────────────────────────────────────────────────────────────────────────
--- SELECT proname FROM pg_proc WHERE proname = 'deliver_order';        -- 0 filas
--- SELECT to_regclass('public.orders');                                -- 'orders' (2A.1 aplicada)
+-- SELECT proname FROM pg_proc WHERE proname IN ('deliver_order','get_calendar_month');
+--   → espero 1 fila: get_calendar_month (v1). deliver_order aún no existe.
+-- SELECT to_regclass('public.orders');   → 'orders' (2A.1 aplicada)
 
 
 -- ─────────────────────────────────────────────────────────────────────────
--- PASO 1 — RPC atómica deliver_order
+-- PASO 1 — deliver_order (correr SOLO este bloque, en una query nueva)
 -- ─────────────────────────────────────────────────────────────────────────
--- NOTA (incidente 2026-06-12): la primera versión usaba `SELECT * INTO
--- v_order` (plpgsql). El SQL Editor de Supabase lo confunde con el
--- SELECT INTO de SQL plano (que crea una tabla) y le INYECTA un
--- "ALTER TABLE v_order ENABLE ROW LEVEL SECURITY" adentro del cuerpo
--- $$...$$, rompiendo el script con 42601 (unterminated dollar-quoted
--- string). Por eso esta versión evita SELECT...INTO: el UPDATE con guard
--- hace el lock atómico él solo (de dos callers en paralelo, uno matchea
--- status='pending' y el otro afecta 0 filas) y RETURNING...INTO no
--- dispara la heurística del editor.
 
 CREATE OR REPLACE FUNCTION public.deliver_order(
   p_order_id     UUID,
   p_paid         BOOLEAN,
-  p_account_id   UUID DEFAULT NULL,   -- obligatorio si p_paid: la plata entró a ALGUNA cuenta
-  p_delivered_on DATE DEFAULT NULL    -- todayLocalISO() del cliente — NUNCA CURRENT_DATE (R3)
+  p_account_id   UUID DEFAULT NULL,
+  p_delivered_on DATE DEFAULT NULL
 )
 RETURNS TABLE (order_id UUID, transaction_id UUID)
 LANGUAGE plpgsql
@@ -70,22 +71,14 @@ BEGIN
   IF p_paid AND p_account_id IS NULL THEN
     RAISE EXCEPTION 'ACCOUNT_REQUIRED';
   END IF;
-
-  -- Lock + guard atómico en el propio UPDATE (R2). Un id ajeno no pasa
-  -- la RLS → 0 filas → NOT FOUND (R4). Si algo falla después (cuenta
-  -- inválida, insert), TODO se revierte — el pedido no queda 'delivered'.
   UPDATE public.orders
   SET status = 'delivered'
   WHERE id = p_order_id AND status = 'pending'
   RETURNING business_id, amount, description
   INTO v_business_id, v_amount, v_description;
-
   IF NOT FOUND THEN
     RAISE EXCEPTION 'ORDER_NOT_PENDING';
   END IF;
-
-  -- Defensa de integridad: la cuenta debe ser del MISMO business del pedido
-  -- (un uuid de cuenta ajena o archivada no debe colarse en la venta).
   IF p_paid THEN
     PERFORM 1 FROM public.accounts
     WHERE id = p_account_id
@@ -95,10 +88,6 @@ BEGIN
       RAISE EXCEPTION 'ACCOUNT_INVALID';
     END IF;
   END IF;
-
-  -- La conversión: aterriza en el modelo F1-J existente sin inventar nada.
-  -- date = fecha de ENTREGA (el hecho económico es la entrega — devengado).
-  -- status legacy se setea coherente para los caminos viejos de isPending (ADR #26).
   INSERT INTO public.transactions
     (business_id, type, amount, date, category, description,
      status, settled_at, to_account_id)
@@ -109,11 +98,9 @@ BEGIN
      CASE WHEN p_paid THEN p_delivered_on END,
      CASE WHEN p_paid THEN p_account_id END)
   RETURNING id INTO v_tx_id;
-
   UPDATE public.orders
   SET transaction_id = v_tx_id
   WHERE id = p_order_id;
-
   RETURN QUERY SELECT p_order_id, v_tx_id;
 END;
 $fn$;
@@ -122,9 +109,9 @@ GRANT EXECUTE ON FUNCTION public.deliver_order(UUID, BOOLEAN, UUID, DATE) TO aut
 
 
 -- ─────────────────────────────────────────────────────────────────────────
--- PASO 2 — get_calendar_month v2 (+ orders_count por día)
+-- PASO 2 — get_calendar_month v2 (correr SOLO este bloque, en query nueva)
 -- ─────────────────────────────────────────────────────────────────────────
--- R6: cambiar el tipo de retorno exige DROP — CREATE OR REPLACE fallaría.
+
 DROP FUNCTION public.get_calendar_month(UUID, DATE);
 
 CREATE FUNCTION public.get_calendar_month(
@@ -135,7 +122,7 @@ RETURNS TABLE (date DATE, income NUMERIC, expense NUMERIC, orders_count INT)
 LANGUAGE sql
 STABLE
 SECURITY INVOKER
-AS $$
+AS $fn$
   WITH bounds AS (
     SELECT
       date_trunc('month', p_anchor)::date AS m_start,
@@ -149,14 +136,11 @@ AS $$
     FROM public.transactions t, bounds b
     WHERE t.business_id = p_business_id
       AND t.date BETWEEN b.m_start AND b.m_end
-      AND t.type IN ('income', 'expense')   -- paridad con las cards (ADR #20)
-      AND t.date <= CURRENT_DATE            -- plata: JAMÁS en el futuro
+      AND t.type IN ('income', 'expense')
+      AND t.date <= CURRENT_DATE
     GROUP BY t.date
   ),
   ords AS (
-    -- Pedidos pendientes: compromiso de entrega, NO plata — por eso SÍ
-    -- viven en días futuros (la distinción visual la hace el widget).
-    -- Los entregados no cuentan acá: ya son puntos de plata vía su venta.
     SELECT o.delivery_date AS date, COUNT(*)::int AS orders_count
     FROM public.orders o, bounds b
     WHERE o.business_id = p_business_id
@@ -171,7 +155,7 @@ AS $$
     COALESCE(o.orders_count, 0) AS orders_count
   FROM money m
   FULL OUTER JOIN ords o ON o.date = m.date;
-$$;
+$fn$;
 
 GRANT EXECUTE ON FUNCTION public.get_calendar_month(UUID, DATE) TO authenticated;
 
@@ -191,9 +175,10 @@ GRANT EXECUTE ON FUNCTION public.get_calendar_month(UUID, DATE) TO authenticated
 --        WHERE business_id = (SELECT id FROM b) AND type = 'income'
 --          AND date BETWEEN date_trunc('month', CURRENT_DATE)::date AND CURRENT_DATE) AS direct_income;
 --
--- 3) Test funcional COMPLETO del ciclo (correr entero; al final queda todo
---    limpio). Crea pedido → entrega SIN cobro → valida venta Por Cobrar +
---    orders_count → borra la venta → el trigger R7 revierte → limpieza.
+-- 3) Test funcional COMPLETO del ciclo (correr CADA sub-paso por separado;
+--    al final queda todo limpio). Crea pedido → marca en calendario →
+--    entrega SIN cobro → venta Por Cobrar → doble entrega rechazada →
+--    borrar venta deshace entrega (trigger R7) → limpieza.
 --
 --   -- 3a. Pedido de prueba con entrega en 3 días
 --   INSERT INTO public.orders (business_id, client_name, description, amount, delivery_date)
@@ -214,7 +199,7 @@ GRANT EXECUTE ON FUNCTION public.get_calendar_month(UUID, DATE) TO authenticated
 --   -- 3d. La venta quedó Por Cobrar (espero: type income, settled_at NULL):
 --   SELECT type, amount, settled_at FROM public.transactions WHERE description = 'ciclo completo';
 --
---   -- 3e. Doble entrega debe FALLAR (espero: ERROR ORDER_NOT_PENDING):
+--   -- 3e. Doble entrega debe FALLAR (espero: ERROR ORDER_NOT_PENDING — si da error, está BIEN):
 --   SELECT * FROM public.deliver_order(
 --     (SELECT id FROM public.orders WHERE client_name = 'TEST e2e'),
 --     false, NULL, CURRENT_DATE
