@@ -10,9 +10,12 @@
 -- ║                                                                        ║
 -- ║  Diseño:                                                               ║
 -- ║   - RLS owner estándar DESDE EL PRIMER INSERT (regla no-negociable #3).║
--- ║   - `transaction_id` ON DELETE SET NULL: si el usuario borra la venta  ║
--- ║     desde Movimientos, el pedido queda 'delivered' sin link — estado   ║
--- ║     raro pero honesto; RESTRICT daría un error inexplicable al borrar. ║
+-- ║   - Borrar la venta vinculada = DESHACER la entrega: un trigger        ║
+-- ║     (PASO 4) devuelve el pedido a 'pending' y limpia transaction_id.   ║
+-- ║     Sin estados huérfanos ('delivered' sin plata no existe) y el       ║
+-- ║     pedido vuelve a la agenda, re-entregable. El FK queda SET NULL     ║
+-- ║     como red de seguridad si el trigger faltara; RESTRICT daría un     ║
+-- ║     error inexplicable al borrar desde Movimientos.                    ║
 -- ║   - `external_event_id` reservado para Google Calendar (P-012,         ║
 -- ║     parqueado) → cero re-migración cuando entre.                       ║
 -- ║   - Índice parcial sobre 'pending': calendario y agenda solo miran     ║
@@ -75,6 +78,42 @@ CREATE INDEX orders_pending_idx
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- PASO 4 — Trigger "borrar la venta deshace la entrega"
+-- ─────────────────────────────────────────────────────────────────────────
+-- Sin esto, borrar la transaction vinculada dejaría el pedido 'delivered'
+-- sin plata registrada y SIN camino de recuperación ('delivered' es
+-- terminal) — la venta del pedido se perdería salvo recarga manual.
+-- Con el trigger, la semántica es honesta: borrar la venta = "esa entrega
+-- no valió" → el pedido vuelve a 'pending', reaparece en la agenda y se
+-- puede volver a entregar. La garantía vive en DB (mismo principio que
+-- deliver_order): funciona igual si el delete vino de Movimientos, del
+-- SQL Editor o de un código futuro que se olvide del vínculo.
+--
+-- BEFORE DELETE a propósito: corre antes de que el FK SET NULL limpie
+-- transaction_id, así el WHERE todavía encuentra el pedido.
+-- Sin SECURITY DEFINER: el UPDATE corre como el usuario y la RLS de
+-- `orders` aplica (el dueño de la venta es el dueño del pedido).
+
+CREATE OR REPLACE FUNCTION public.revert_order_on_transaction_delete()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  UPDATE public.orders
+  SET status = 'pending', transaction_id = NULL
+  WHERE transaction_id = OLD.id
+    AND status = 'delivered';
+  RETURN OLD;
+END;
+$$;
+
+CREATE TRIGGER orders_revert_on_tx_delete
+  BEFORE DELETE ON public.transactions
+  FOR EACH ROW
+  EXECUTE FUNCTION public.revert_order_on_transaction_delete();
+
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- Verificación POST (correr después de aplicar — LESSONS #6)
 -- ─────────────────────────────────────────────────────────────────────────
 -- 1) La tabla existe (debe devolver 'orders', NO null):
@@ -94,6 +133,14 @@ CREATE INDEX orders_pending_idx
 --   INSERT INTO public.orders (business_id, client_name, description, amount, delivery_date, status)
 --   VALUES ((SELECT id FROM public.businesses LIMIT 1), 'probe', 'probe', 1, CURRENT_DATE, 'bogus');
 --
--- 6) Probe RLS sin sesión (correr desde un cliente ANON sin login, NO desde
+-- 6) Trigger de reversión presente (debe devolver 1 fila):
+--   SELECT tgname FROM pg_trigger WHERE tgname = 'orders_revert_on_tx_delete';
+--
+-- 7) Probe RLS sin sesión (correr desde un cliente ANON sin login, NO desde
 --    el SQL Editor que es service_role): el INSERT debe fallar con 42501.
 --    Desde el SQL Editor alcanza con confirmar 2) y 3).
+--
+-- 8) (Funcional, se completa en el e2e de 2A.2 cuando exista deliver_order:
+--    entregar un pedido → borrar la venta desde Movimientos → el pedido
+--    debe volver a 'pending' con transaction_id NULL y reaparecer en la
+--    agenda del calendario.)
