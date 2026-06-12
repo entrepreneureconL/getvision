@@ -194,6 +194,88 @@ export function getPeriodRange(
 }
 
 /**
+ * F1-O / D-19 (calendario como filtro) — rango generalizado del dashboard.
+ *
+ * Generaliza `Period` (enum) a un rango arbitrario `[start, end]`: el calendario
+ * permite seleccionar un día suelto o un rango custom (tap-tap), que el enum no
+ * puede expresar. `kind` distingue de dónde vino para que el UI sincronice los
+ * chips del SegmentedControl (D-19.b).
+ *
+ *   kind 'day'|'week'|'month' → vino de un chip; delega en getPeriodRange.
+ *   kind 'custom'             → vino del calendario; prev = rango inmediatamente
+ *                               anterior de IGUAL longitud (misma regla que
+ *                               getPeriodRange para semana/mes).
+ */
+export type DashboardRange = {
+  kind: 'day' | 'week' | 'month' | 'custom';
+  start: string;
+  end: string;
+  prevStart: string;
+  prevEnd: string;
+  label: string;
+  prevLabel: string;
+};
+
+/** Cantidad de días que cubre [start, end] inclusive. */
+function rangeLengthDays(start: string, end: string): number {
+  const ms = parseLocalISODate(end).getTime() - parseLocalISODate(start).getTime();
+  return Math.round(ms / 86_400_000) + 1;
+}
+
+/** Label corto de un rango custom: "8–14 jun" / "28 may–3 jun" / "8 jun" (día). */
+function customRangeLabel(start: string, end: string): string {
+  const s = parseLocalISODate(start);
+  const e = parseLocalISODate(end);
+  const shortMonth = (d: Date) =>
+    d.toLocaleString('es-AR', { month: 'short' }).replace('.', '');
+  if (start === end) return `${s.getDate()} ${shortMonth(s)}`;
+  const sameMonth = s.getMonth() === e.getMonth() && s.getFullYear() === e.getFullYear();
+  return sameMonth
+    ? `${s.getDate()}–${e.getDate()} ${shortMonth(e)}`
+    : `${s.getDate()} ${shortMonth(s)}–${e.getDate()} ${shortMonth(e)}`;
+}
+
+/**
+ * Resuelve un `DashboardRange` desde un chip (Period) o un rango custom del
+ * calendario. Los chips delegan en `getPeriodRange` (cero duplicación de lógica
+ * ni de timezone); el custom calcula su comparativa por longitud.
+ *
+ * 'year' (solo Stats) cae en kind 'custom' — el dashboard no lo ofrece, pero
+ * tipar el caso evita que un caller lo rompa.
+ */
+export function resolveRange(
+  input: Period | { start: string; end: string },
+  anchor: Date = new Date(),
+): DashboardRange {
+  if (typeof input === 'string') {
+    const r = getPeriodRange(input, anchor);
+    return {
+      kind: input === 'year' ? 'custom' : input,
+      start: r.start,
+      end: r.end,
+      prevStart: r.prevStart,
+      prevEnd: r.prevEnd,
+      label: r.label,
+      prevLabel: r.prevLabel,
+    };
+  }
+
+  const { start, end } = input;
+  const len = rangeLengthDays(start, end);
+  const prevEnd = toISODate(addDays(parseLocalISODate(start), -1));
+  const prevStart = toISODate(addDays(parseLocalISODate(prevEnd), -(len - 1)));
+  return {
+    kind: 'custom',
+    start,
+    end,
+    prevStart,
+    prevEnd,
+    label: customRangeLabel(start, end),
+    prevLabel: 'período anterior',
+  };
+}
+
+/**
  * F1-M Fase B (refactor B5) — calcula el rango [start, end] + el rango
  * equivalente del período anterior para la variación neta del MiPlataCard.
  *

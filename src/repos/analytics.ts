@@ -39,6 +39,7 @@ import {
   type PeriodRange,
   type StockPeriod,
 } from '../utils/periods';
+import { supabase } from '../lib/supabase';
 import {
   transactionsRepo,
   type DashboardKPIs,
@@ -216,6 +217,32 @@ export type FlowSeriesPoint = {
   expense: number;
   isToday: boolean;
 };
+
+/**
+ * F1-O / D-19 — un día del mes calendario, agregado para el widget
+ * <CalendarMonth/>. Estructuralmente compatible con `CalendarDayData` del DS
+ * (la screen mapea repo → primitivo).
+ *
+ * A diferencia de `FlowSeriesPoint` (serie del PERÍODO, corta en hoy), esto es
+ * el MES CALENDARIO COMPLETO e independiente del filtro activo: si el usuario
+ * filtra "hoy", los puntos del resto del mes no pueden desaparecer (§4.7).
+ *
+ * `ordersCount` viaja en el tipo desde ya (para que el front pinte marcas de
+ * pedidos sin re-trabajo), pero el RPC de Fase 1 es SOLO-PLATA → llega en 0
+ * hasta que Fase 2 (entidad `orders`) extienda `get_calendar_month`.
+ */
+export type CalendarDay = {
+  date: string;
+  income: number;
+  expense: number;
+  ordersCount: number;
+};
+
+// Caché en memoria del mes calendario, estable salvo escritura. Evita recargar
+// en cada cambio de período (el filtro cambia, el mes no). Sin react-query
+// todavía (F2) — se invalida con los mismos triggers de reload del dashboard.
+// key = `${businessId}:${YYYY-MM}`.
+const calendarMonthCache = new Map<string, CalendarDay[]>();
 
 /**
  * F1-M Fase B (refactor B5) — Snapshot de MiPlata con variación neta del período.
@@ -905,5 +932,68 @@ export const analyticsRepo = {
       period: stockPeriod,
       prevLabel: range.prevLabel,
     };
+  },
+
+  /**
+   * F1-O / D-19 — agregado del MES CALENDARIO COMPLETO para <CalendarMonth/>.
+   *
+   * Una sola query agregada (RPC `get_calendar_month`, GROUP BY date) — NO N
+   * queries por día. El RPC excluye `_extraordinary` (cuenta lo MISMO que las
+   * cards o miente — ADR #20 / paridad con buildFlowBlock) y excluye días
+   * futuros (cero plata en el futuro, a nivel de datos). RLS aplica vía
+   * SECURITY INVOKER: aunque se pase un business ajeno, devuelve vacío.
+   *
+   * Memoizado por (businessId, mes): el filtro de período cambia seguido pero el
+   * mes no. Llamar `invalidateCalendarMonth(businessId)` tras guardar/editar/
+   * saldar para refrescar (lo cablea la integración D-19.b).
+   *
+   * Fase 1 = solo plata → `ordersCount` viene en 0. Fase 2 extiende el RPC.
+   *
+   * @param anchor 'YYYY-MM-DD' — cualquier fecha del mes a traer.
+   */
+  async getCalendarMonth(businessId: string, anchor: string): Promise<CalendarDay[]> {
+    const cacheKey = `${businessId}:${anchor.slice(0, 7)}`;
+    const cached = calendarMonthCache.get(cacheKey);
+    if (cached) return cached;
+
+    const { data, error } = await supabase.rpc('get_calendar_month', {
+      p_business_id: businessId,
+      p_anchor: anchor,
+    });
+
+    if (error) {
+      console.error('[analytics] getCalendarMonth error:', error);
+      return [];
+    }
+
+    // DECIMAL puede volver como string desde Postgres — coercer (TECH §11).
+    const rows = ((data ?? []) as Array<{
+      date: string;
+      income: number | string;
+      expense: number | string;
+    }>).map(r => ({
+      date: r.date,
+      income: Number(r.income),
+      expense: Number(r.expense),
+      ordersCount: 0, // Fase 2: el RPC sumará orders_count por día.
+    }));
+
+    calendarMonthCache.set(cacheKey, rows);
+    return rows;
+  },
+
+  /**
+   * Invalida la caché del calendario. Sin businessId limpia todo (logout);
+   * con businessId limpia solo sus meses. La llama el dashboard tras cada
+   * escritura que cambie los agregados (guardar/editar/saldar/entregar).
+   */
+  invalidateCalendarMonth(businessId?: string): void {
+    if (!businessId) {
+      calendarMonthCache.clear();
+      return;
+    }
+    for (const key of calendarMonthCache.keys()) {
+      if (key.startsWith(`${businessId}:`)) calendarMonthCache.delete(key);
+    }
   },
 };

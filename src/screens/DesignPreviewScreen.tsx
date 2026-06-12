@@ -27,9 +27,11 @@ import {
   TabBar,
   SideNav,
   ProportionList,
+  CalendarMonth,
   color,
   space,
   type TabItem,
+  type CalendarDayData,
 } from '../design';
 
 // ── Mock: TabBar (D-4) ──
@@ -99,10 +101,39 @@ const MOCK_FLOW: MonthFlowResult = {
   prevDailyAvgIncome: 45000,
 };
 
+// ── Mock: CalendarMonth (D-19) — junio 2026, hoy = 11 ──
+const CALENDAR_TODAY = '2026-06-11';
+const CALENDAR_DAYS: CalendarDayData[] = [
+  { date: '2026-06-02', income: 65000,  expense: 0,     ordersCount: 0 },
+  { date: '2026-06-03', income: 0,      expense: 42000, ordersCount: 0 },
+  { date: '2026-06-05', income: 120000, expense: 30000, ordersCount: 0 },
+  { date: '2026-06-08', income: 88000,  expense: 0,     ordersCount: 0 },
+  { date: '2026-06-09', income: 0,      expense: 15000, ordersCount: 0 },
+  { date: '2026-06-10', income: 54000,  expense: 12000, ordersCount: 0 },
+  { date: '2026-06-11', income: 31000,  expense: 0,     ordersCount: 2 }, // hoy: plata + pedidos
+  { date: '2026-06-14', income: 0,      expense: 0,     ordersCount: 1 }, // futuro: 1 pedido
+  { date: '2026-06-20', income: 0,      expense: 0,     ordersCount: 3 }, // futuro: 3 pedidos
+];
+
 export default function DesignPreviewScreen() {
   const [incomeAxis, setIncomeAxis] = useState<BreakdownAxis>('channel');
   const [expenseAxis, setExpenseAxis] = useState<BreakdownAxis>('channel');
   const [previewTab, setPreviewTab] = useState<PreviewTab>('home');
+  // Selección del calendario por tap-tap (la misma máquina que usará D-19.b).
+  const [calSel, setCalSel] = useState<{ start: string; end: string } | null>({
+    start: '2026-06-08',
+    end: '2026-06-11',
+  });
+  const handleCalPress = (date: string) => {
+    setCalSel(prev => {
+      // Sin selección o ya es rango → arranca selección nueva de un día.
+      if (!prev || prev.start !== prev.end) return { start: date, end: date };
+      // Día único previo → segundo tap arma el rango (ordenado).
+      return prev.start <= date
+        ? { start: prev.start, end: date }
+        : { start: date, end: prev.start };
+    });
+  };
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -159,6 +190,25 @@ export default function DesignPreviewScreen() {
             prevExpense={140000}
             prevLabel="semana pasada"
           />
+        </Section>
+
+        <Section title="CalendarMonth — mes con puntos, hoy y rango (D-19, tap-tap)">
+          <Card padding="lg">
+            <CalendarMonth
+              anchor={CALENDAR_TODAY}
+              today={CALENDAR_TODAY}
+              days={CALENDAR_DAYS}
+              selection={calSel}
+              onDayPress={handleCalPress}
+            />
+            <Text variant="micro" color="tertiary" style={{ marginTop: space['3'] }}>
+              {calSel
+                ? calSel.start === calSel.end
+                  ? `Día: ${calSel.start} (tap otro día = rango)`
+                  : `Rango: ${calSel.start} → ${calSel.end} (tap = reinicia)`
+                : 'Sin selección'}
+            </Text>
+          </Card>
         </Section>
 
         <Section title="TabBar — navegación inferior (D-4, Ionicons)">

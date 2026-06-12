@@ -36,3 +36,5 @@ export type { TabItem } from './components/TabBar';
 export { default as SideNav } from './components/SideNav';
 export { default as ProportionList } from './components/ProportionList';
 export type { ProportionItem } from './components/ProportionList';
+export { default as CalendarMonth } from './components/CalendarMonth';
+export type { CalendarDayData } from './components/CalendarMonth';
