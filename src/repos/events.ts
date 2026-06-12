@@ -29,7 +29,10 @@ export type AppEventName =
   | 'transaction_created'    // venta/costo/movimiento creado (props: type, category, settled)
   | 'transaction_settled'    // pendiente marcado como cobrado/pagado
   | 'hint_tap'               // D-5: tap en hint contextual (props: key) — mide si la anticipación sirve
-  | 'calendar_filter';       // F1-O/D-19: filtro por calendario (props: kind 'day'|'range') — sin fechas ni montos
+  | 'calendar_filter'        // F1-O/D-19: filtro por calendario (props: kind 'day'|'range') — sin fechas ni montos
+  | 'order_created'          // F1-O/D-21: pedido creado (props: has_time, days_ahead) — sin montos ni cliente
+  | 'order_cancelled'        // F1-O/D-21: pedido cancelado
+  | 'order_delivered';       // F1-O/D-21: pedido entregado via deliver_order (props: paid) — emite 2A.2
 
 export const eventsRepo = {
   /**
