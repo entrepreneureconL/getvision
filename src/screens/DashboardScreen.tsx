@@ -116,6 +116,13 @@ const STOCK_OF: Record<Period, StockPeriod> = {
   year: 'year', // D-6: el dashboard no ofrece 'year' en su selector, pero el tipo lo exige
 };
 
+/** Opciones del selector único de período (G-1). */
+const PERIOD_OPTIONS: { value: Period; label: string }[] = [
+  { value: 'day', label: 'Hoy' },
+  { value: 'week', label: 'Semana' },
+  { value: 'month', label: 'Mes' },
+];
+
 /** Saludo según hora del día. Pequeño detalle de calidez. */
 function greetingFor(date: Date = new Date()): string {
   const h = date.getHours();
@@ -173,6 +180,8 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   const [customRange, setCustomRange]         = useState<{ start: string; end: string } | null>(null);
   /** F1-O / D-19 — agregado del mes calendario para el widget <CalendarMonth/>. */
   const [calendarDays, setCalendarDays]       = useState<CalendarDay[]>([]);
+  /** F1-O / D-19.c — móvil: el calendario arranca colapsado (no come ~300px). */
+  const [calendarExpanded, setCalendarExpanded] = useState(false);
   /** F1-D Task #11: si está seteada, los forms se abren en modo edit. */
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   /** D-5 — keys de hints descartados en ESTA sesión (sin persistencia v1). */
@@ -324,7 +333,12 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
         : { start: date, end: customRange.start };
     setCustomRange(next);
     if (business) loadSelection(business, resolveRange(next));
-    // TODO 1D: telemetría calendar_filter ({ kind: next.start === next.end ? 'day' : 'range' }).
+    // F1-O/D-19.c — telemetría F1-N: solo el kind, sin fechas ni montos.
+    if (businessId) {
+      eventsRepo.track(businessId, 'calendar_filter', {
+        kind: next.start === next.end ? 'day' : 'range',
+      });
+    }
   };
 
   /**
@@ -868,17 +882,55 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
                 maxWidth: isWide ? 480 : undefined,
               }}
             >
-              <SegmentedControl<Period>
-                // F1-O/D-19.b: con rango custom activo, ningún chip queda activo
-                // (value fuera de options = sin highlight) — preserva G-1.
-                value={customRange ? ('' as Period) : period}
-                onChange={handlePeriodChange}
-                options={[
-                  { value: 'day', label: 'Hoy' },
-                  { value: 'week', label: 'Semana' },
-                  { value: 'month', label: 'Mes' },
-                ]}
-              />
+              {/* F1-O/D-19.b: con rango custom activo, ningún chip queda activo
+                  (value fuera de options = sin highlight) — preserva G-1. */}
+              {isWide ? (
+                // Escritorio: el calendario vive siempre visible en la columna
+                // izquierda (renderSimpleSection) — el selector va solo.
+                <SegmentedControl<Period>
+                  value={customRange ? ('' as Period) : period}
+                  onChange={handlePeriodChange}
+                  options={PERIOD_OPTIONS}
+                />
+              ) : (
+                // Móvil (D-19.c): el mes entero come ~300px y compite con la
+                // respuesta de 5 segundos (principios #1/#6) → colapsado por
+                // default, con un toggle calendar-outline junto al selector.
+                <>
+                  <Stack direction="row" align="center" gap="2">
+                    <View style={{ flex: 1 }}>
+                      <SegmentedControl<Period>
+                        value={customRange ? ('' as Period) : period}
+                        onChange={handlePeriodChange}
+                        options={PERIOD_OPTIONS}
+                      />
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => setCalendarExpanded(e => !e)}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: radius.pill,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: token.bg.raised,
+                      }}
+                    >
+                      <Ionicons
+                        name={calendarExpanded ? 'calendar' : 'calendar-outline'}
+                        size={20}
+                        // Acento si hay filtro activo o el calendario está abierto.
+                        color={customRange || calendarExpanded ? token.accent.base : token.text.secondary}
+                      />
+                    </TouchableOpacity>
+                  </Stack>
+                  {calendarExpanded ? (
+                    <View style={{ marginTop: space['3'] }}>{renderCalendar()}</View>
+                  ) : null}
+                </>
+              )}
             </View>
           ) : null}
 

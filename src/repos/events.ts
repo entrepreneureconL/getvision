@@ -28,7 +28,8 @@ export type AppEventName =
   | 'onboarding_completed'   // usuario terminó el onboarding
   | 'transaction_created'    // venta/costo/movimiento creado (props: type, category, settled)
   | 'transaction_settled'    // pendiente marcado como cobrado/pagado
-  | 'hint_tap';              // D-5: tap en hint contextual (props: key) — mide si la anticipación sirve
+  | 'hint_tap'               // D-5: tap en hint contextual (props: key) — mide si la anticipación sirve
+  | 'calendar_filter';       // F1-O/D-19: filtro por calendario (props: kind 'day'|'range') — sin fechas ni montos
 
 export const eventsRepo = {
   /**
