@@ -66,7 +66,10 @@ import CostForm         from '../components/CostForm';
 import MovementForm     from '../components/MovementForm';
 import QuickProductForm from '../components/QuickProductForm';
 import QuickHoursForm   from '../components/QuickHoursForm';
+import OrderForm        from '../components/OrderForm';
+import OrdersDayList    from '../components/OrdersDayList';
 import type { Transaction } from '../schemas/transaction';
+import type { Order } from '../schemas/order';
 import {
   Heading,
   Text,
@@ -80,7 +83,7 @@ import {
   breakpoint,
 } from '../design';
 
-type Modal_ = null | 'sales' | 'costs' | 'movements' | 'product' | 'hours' | 'picker';
+type Modal_ = null | 'sales' | 'costs' | 'movements' | 'product' | 'hours' | 'picker' | 'order' | 'ordersDay';
 
 type Props = {
   onSignOut: () => void;
@@ -184,6 +187,10 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   /** F1-D Task #11: si está seteada, los forms se abren en modo edit. */
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  /** F1-O/D-21.a — pedido en edición (OrderForm modo edit). */
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  /** F1-O/D-21.a — día cuya agenda de pedidos está abierta (OrdersDayList). */
+  const [ordersDayDate, setOrdersDayDate] = useState<string | null>(null);
   /** D-5 — keys de hints descartados en ESTA sesión (sin persistencia v1). */
   const [dismissedHints, setDismissedHints] = useState<string[]>([]);
 
@@ -326,6 +333,20 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
    * resolveRange, y des-selecciona los chips (el calendario NO es un 2º reloj).
    */
   const handleCalendarDayPress = (date: string) => {
+    // F1-O/D-21.a — un día (hoy o futuro) con pedidos abre la AGENDA del día,
+    // no el filtro: lo accionable ahí es "Entregar" (spec DESIGN §4.7.bis).
+    // El filtro de "hoy" sigue viviendo en el chip del SegmentedControl.
+    // Días futuros sin pedidos: no-op (ADR #20 — el futuro no tiene plata).
+    const todayISO = todayLocalISO();
+    if (date >= todayISO) {
+      const day = calendarDays.find(d => d.date === date);
+      if ((day?.ordersCount ?? 0) > 0) {
+        setOrdersDayDate(date);
+        setActiveModal('ordersDay');
+        return;
+      }
+      if (date > todayISO) return;
+    }
     const next = !customRange || customRange.start !== customRange.end
       ? { start: date, end: date }
       : customRange.start <= date
@@ -369,6 +390,8 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
     setActiveModal(null);
     setShowMoreOptions(false);
     setEditingTransaction(null);
+    setEditingOrder(null);
+    setOrdersDayDate(null);
     // F1-O: la memo del calendario es estable por mes → invalidar tras una
     // escritura para que loadDashboardData traiga los agregados frescos.
     if (businessId) analyticsRepo.invalidateCalendarMonth(businessId);
@@ -763,6 +786,20 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
             );
           })}
 
+          {/* F1-O/D-21.a — pedidos de clientes: la palabra del usuario es
+              "Pedido" (naming spec §4.7.bis). Acento teal de marca. */}
+          <TouchableOpacity
+            style={[styles.pickerItem, { borderLeftColor: token.accent.base }]}
+            onPress={() => { setShowMoreOptions(false); setActiveModal('order'); }}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="calendar-number-outline" size={22} color={token.accent.base} style={styles.pickerIcon} />
+            <View style={styles.pickerTextWrap}>
+              <RNText style={styles.pickerItemTitle}>Pedido</RNText>
+              <RNText style={styles.pickerItemSub}>Te encargaron algo con fecha de entrega</RNText>
+            </View>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.pickerItem, { borderLeftColor: token.info.base }]}
             onPress={() => { setShowMoreOptions(false); setActiveModal('hours'); }}
@@ -975,6 +1012,24 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
       )}
       {activeModal === 'movements' && businessId.length > 0 && (
         <MovementForm businessId={businessId} onSuccess={closeModal} onClose={() => setActiveModal(null)} />
+      )}
+
+      {/* F1-O/D-21.a — pedidos: form de carga/edición + agenda del día. */}
+      {activeModal === 'order' && businessId.length > 0 && (
+        <OrderForm
+          businessId={businessId}
+          order={editingOrder ?? undefined}
+          onSuccess={closeModal}
+          onClose={() => { setActiveModal(null); setEditingOrder(null); }}
+        />
+      )}
+      {activeModal === 'ordersDay' && ordersDayDate != null && businessId.length > 0 && (
+        <OrdersDayList
+          businessId={businessId}
+          dateISO={ordersDayDate}
+          onClose={closeModal}
+          onEditOrder={(o) => { setEditingOrder(o); setActiveModal('order'); }}
+        />
       )}
 
       <QuickProductForm
