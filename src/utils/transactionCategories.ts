@@ -41,6 +41,10 @@ export const INCOME_CATEGORIES: CategoryDef[] = [
   { value: 'service_main',  label: 'Servicio principal', icon: '✂️',  tint: 'success', type: 'income' },
   { value: 'service_extra', label: 'Servicio adicional', icon: '✨',  tint: 'success', type: 'income' },
   { value: 'product',       label: 'Venta de producto',  icon: '📦',  tint: 'success', type: 'income' },
+  // F1-O Etapa 2: la RPC deliver_order guarda category='pedido' al convertir
+  // un pedido en venta — esta default hace que el desglose por etiqueta lo
+  // muestre como concepto propio (sin migration — ADR #15, string libre).
+  { value: 'pedido',        label: 'Pedido entregado',   icon: '🧺',  tint: 'success', type: 'income' },
   { value: 'advance',       label: 'Adelanto de cliente', icon: '💳', tint: 'info',    type: 'income' },
   { value: 'tip',           label: 'Propina',            icon: '🎁',  tint: 'success', type: 'income' },
   { value: 'other_income',  label: 'Otro ingreso',       icon: '↗️',  tint: 'success', type: 'income' },
