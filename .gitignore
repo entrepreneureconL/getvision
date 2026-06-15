@@ -51,3 +51,5 @@ credentials.json
 # Docs del proyecto — viven afuera del repo por decisión CEO (2026-06-10).
 # MASTER + TECH + RESEARCH + LESSONS están en C:\Users\Cristopher\Documents\Work\GetVision\md\
 GETVISION_*.md
+# Claude Code (local, no versionar)
+.claude/

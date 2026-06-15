@@ -24,6 +24,7 @@ import { confirmDestructive } from '../utils/confirm';
 import { todayLocalISO } from '../utils/periods';
 import { ordersRepo } from '../repos/orders';
 import type { Order } from '../schemas/order';
+import { ModalShell } from '../design';
 
 type Props = {
   businessId: string;
@@ -61,6 +62,16 @@ export default function OrderForm({
     !isNaN(amountNumber) && amountNumber > 0 &&
     DATE_RE.test(deliveryDate) &&
     !loading;
+
+  // D-20.b — ¿cambios sin guardar? Backdrop/Esc piden confirmación; × directo.
+  const initialAmountStr = order ? String(order.amount).replace('.', ',') : '';
+  const initialDelivery = order?.delivery_date ?? initialDeliveryDate ?? todayLocalISO();
+  const dirty = isEdit
+    ? clientName !== (order?.client_name ?? '')
+      || description !== (order?.description ?? '')
+      || amount !== initialAmountStr
+      || deliveryDate !== initialDelivery
+    : clientName.trim() !== '' || description.trim() !== '' || amount.trim() !== '';
 
   const handleSave = async () => {
     if (!canSubmit) return;
@@ -105,7 +116,7 @@ export default function OrderForm({
   };
 
   return (
-    <View style={styles.overlay}>
+    <ModalShell visible onClose={onClose} dirty={dirty}>
       <View style={styles.panel}>
 
         <View style={styles.panelHeader}>
@@ -203,16 +214,12 @@ export default function OrderForm({
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </ModalShell>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end', zIndex: 100,
-  },
+  // D-20.b — el overlay/backdrop ahora lo provee <ModalShell/> (#16).
   panel: {
     backgroundColor: '#12122A', borderTopLeftRadius: 24,
     borderTopRightRadius: 24, padding: 18, paddingBottom: 0,

@@ -7,11 +7,12 @@
 
 import { useState } from 'react';
 import {
-  Modal, View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Switch,
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ActivityIndicator, Switch,
 } from 'react-native';
 import { hoursLogRepo } from '../repos/hoursLog';
 import { todayLocalISO } from '../utils/periods';
+import { ModalShell } from '../design';
 
 type Props = {
   businessId: string;
@@ -35,6 +36,9 @@ export default function QuickHoursForm({ businessId, visible, onClose, onSuccess
   };
 
   const handleClose = () => { reset(); onClose(); };
+
+  // D-20.b — ¿cambios sin guardar? Backdrop/Esc piden confirmación; Cancelar directo.
+  const dirty = hours.trim() !== '' || rate.trim() !== '' || desc.trim() !== '' || !billable;
 
   const handleSave = async () => {
     setError('');
@@ -73,11 +77,7 @@ export default function QuickHoursForm({ businessId, visible, onClose, onSuccess
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
-      <KeyboardAvoidingView
-        style={styles.backdrop}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+    <ModalShell visible={visible} onClose={handleClose} dirty={dirty} avoidKeyboard>
         <View style={styles.sheet}>
           <View style={styles.handle} />
 
@@ -166,13 +166,12 @@ export default function QuickHoursForm({ businessId, visible, onClose, onSuccess
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+    </ModalShell>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  // D-20.b — backdrop/overlay ahora lo provee <ModalShell/> (#16, avoidKeyboard).
   sheet:    { backgroundColor: '#0F0F1A', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 36 },
   handle:   { width: 36, height: 4, borderRadius: 2, backgroundColor: '#2A2A4A', alignSelf: 'center', marginBottom: 16 },
   title:    { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 4 },

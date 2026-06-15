@@ -38,3 +38,7 @@ export { default as ProportionList } from './components/ProportionList';
 export type { ProportionItem } from './components/ProportionList';
 export { default as CalendarMonth } from './components/CalendarMonth';
 export type { CalendarDayData } from './components/CalendarMonth';
+export { default as CalendarMonthExpanded } from './components/CalendarMonthExpanded';
+export { default as Tooltip } from './components/Tooltip';
+export { default as ModalShell } from './components/ModalShell';
+export { useHover } from './useHover';

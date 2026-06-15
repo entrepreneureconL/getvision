@@ -34,7 +34,7 @@ import { hoursLogRepo, type HoursSummary } from '../repos/hoursLog';
 import { analyticsRepo, type MetricResultWithPeriod, type MetricMeta, type MiPlataSnapshot, type MonthFlowResult, type CalendarDay } from '../repos/analytics';
 import { categoriesRepo } from '../repos/categories';
 import type { CategoryOverride } from '../schemas/categoryOverride';
-import { resolveRange, todayLocalISO, type Period, type StockPeriod, type DashboardRange } from '../utils/periods';
+import { resolveRange, shiftMonthISO, parseLocalISODate, todayLocalISO, type Period, type StockPeriod, type DashboardRange } from '../utils/periods';
 import type { HistoryFilter } from '../utils/historyFilters';
 import {
   getContextualHint,
@@ -65,7 +65,8 @@ import SaleForm         from '../components/SaleForm';
 import CostForm         from '../components/CostForm';
 import MovementForm     from '../components/MovementForm';
 import QuickProductForm from '../components/QuickProductForm';
-import QuickHoursForm   from '../components/QuickHoursForm';
+// RESERVED: Horas — for Estadísticas page and Chofer profile
+// import QuickHoursForm   from '../components/QuickHoursForm';
 import OrderForm        from '../components/OrderForm';
 import OrdersDayList    from '../components/OrdersDayList';
 import type { Transaction } from '../schemas/transaction';
@@ -75,8 +76,11 @@ import {
   Text,
   Stack,
   Card,
+  Button,
   SegmentedControl,
   CalendarMonth,
+  CalendarMonthExpanded,
+  ModalShell,
   color as token,
   space,
   radius,
@@ -86,7 +90,6 @@ import {
 type Modal_ = null | 'sales' | 'costs' | 'movements' | 'product' | 'hours' | 'picker' | 'order' | 'ordersDay';
 
 type Props = {
-  onSignOut: () => void;
   onOpenSettings: () => void;
   /** F1-M.4 — abre la HistoryScreen con un filtro pre-armado. */
   onOpenHistory: (filter: HistoryFilter) => void;
@@ -152,7 +155,7 @@ function buildSubInfo(meta: MetricMeta): string {
   return parts.join('  ·  ');
 }
 
-export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHistory }: Props) {
+export default function DashboardScreen({ onOpenSettings, onOpenHistory }: Props) {
   // D-15: ancho reactivo — en web responde al resize del navegador. Por debajo
   // del breakpoint: una columna (layout validado con Screen Time). Por encima:
   // dos columnas estilo dashboard web (ref. CoinMarketCap). Fuente única del
@@ -183,8 +186,17 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   const [customRange, setCustomRange]         = useState<{ start: string; end: string } | null>(null);
   /** F1-O / D-19 — agregado del mes calendario para el widget <CalendarMonth/>. */
   const [calendarDays, setCalendarDays]       = useState<CalendarDay[]>([]);
+  /** D-23.a — mes que muestra el calendario ('YYYY-MM-DD', día 1). Empieza en el
+   *  mes de hoy; los chevrons ‹ › lo desplazan. Es solo qué mes se DIBUJA — no es
+   *  el filtro (el filtro vive en period/customRange; preserva G-1, un solo reloj). */
+  const [calendarAnchor, setCalendarAnchor]   = useState(todayLocalISO());
   /** F1-O / D-19.c — móvil: el calendario arranca colapsado (no come ~300px). */
   const [calendarExpanded, setCalendarExpanded] = useState(false);
+  /** D-23.b1 — vista EXPANDIDA del calendario (`<CalendarMonthExpanded/>`). En
+   *  escritorio ocupa el ancho de las 2 columnas; en móvil abre full-screen
+   *  (ModalShell). Distinta de `calendarExpanded` (mostrar/ocultar el compacto
+   *  inline en móvil). */
+  const [expandedCalendar, setExpandedCalendar] = useState(false);
   /** F1-D Task #11: si está seteada, los forms se abren en modo edit. */
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   /** F1-O/D-21.a — pedido en edición (OrderForm modo edit). */
@@ -243,12 +255,26 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
    * Para el chip, MiPlata usa su StockPeriod; para el rango, ambos toman el rango.
    */
   const loadSelection = useCallback(async (biz: Business, sel: Period | DashboardRange) => {
-    const [flow, snap] = await Promise.all([
+    // Issue 2 — la lista "Últimos movimientos" sigue la selección activa (un
+    // solo reloj, G-1): se carga acotada al MISMO rango que Flow + MiPlata.
+    const range = typeof sel === 'string' ? resolveRange(sel) : sel;
+    const [flow, snap, movements] = await Promise.all([
       analyticsRepo.getMonthFlow(biz.id, sel),
       analyticsRepo.getMiPlataSnapshot(biz.id, typeof sel === 'string' ? STOCK_OF[sel] : sel),
+      transactionsRepo.listRecentByRange(biz.id, range.start, range.end, 10),
     ]);
     setMonthFlow(flow);
     setMiPlataSnapshot(snap);
+    setRecentTransactions(movements);
+  }, []);
+
+  /** D-23.a — Carga el mes calendario de un ancla. Owner único de `calendarDays`
+   *  (el efecto de abajo lo dispara al montar y al navegar; closeModal lo refresca
+   *  tras una escritura). Memoizado por mes en analyticsRepo → navegar ida/vuelta
+   *  no re-consulta. */
+  const loadCalendarMonth = useCallback(async (bizId: string, anchor: string) => {
+    const days = await analyticsRepo.getCalendarMonth(bizId, anchor);
+    setCalendarDays(days);
   }, []);
 
   /** Carga completa del dashboard. Usa el `period` actual del state para hero.
@@ -280,19 +306,25 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
       // En simple antes era 3 → causaba "lista incompleta" cuando el contador
       // del hero metric ("4 ventas") no coincidía con lo visible.
       const recentLimit = 10;
+      // Issue 2 — la lista sigue el filtro. En el mount (period inicial 'month',
+      // sin customRange) = el mes actual. Tras una escritura con un filtro custom
+      // activo, closeModal sobre-escribe vía loadSelection (este callback usa el
+      // period inicial por su memo []).
+      const recentRange = resolveRange(period);
 
-      const [monthKPIs, stockSummary, hoursSummary, hero, recent, snap, overrides, flow, calDays] = await Promise.all([
+      const [monthKPIs, stockSummary, hoursSummary, hero, recent, snap, overrides, flow] = await Promise.all([
         needKPIs ? transactionsRepo.getKPIsForCurrentMonth(biz.id) : Promise.resolve(EMPTY_KPIS),
         needStock ? productsRepo.getStockSummary(biz.id) : Promise.resolve(EMPTY_STOCK),
         needHours ? hoursLogRepo.getSummaryForCurrentMonth(biz.id) : Promise.resolve(EMPTY_HOURS),
         needHero ? analyticsRepo.getHeroMetricForPeriod(biz, period) : Promise.resolve(null),
-        transactionsRepo.listRecent(biz.id, recentLimit),
+        transactionsRepo.listRecentByRange(biz.id, recentRange.start, recentRange.end, recentLimit),
         analyticsRepo.getMiPlataSnapshot(biz.id, STOCK_OF[period]),  // F1-M Fase B + G-1
         categoriesRepo.listForBusiness(biz.id),  // F1-L
         needFlow ? analyticsRepo.getMonthFlow(biz.id, period) : Promise.resolve(null),  // F1-M.2
-        // F1-O / D-19 — mes calendario completo (solo simple, donde vive el widget).
-        needFlow ? analyticsRepo.getCalendarMonth(biz.id, todayLocalISO()) : Promise.resolve([] as CalendarDay[]),
       ]);
+      // F1-O / D-19 + D-23.a — el mes calendario lo carga el efecto dedicado
+      // (owner único de calendarDays), keyed por `calendarAnchor`. Así la
+      // navegación de mes y el refresh post-escritura quedan consistentes.
 
       setKpis(monthKPIs);
       setStock(stockSummary);
@@ -302,7 +334,6 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
       setMiPlataSnapshot(snap);
       setCategoryOverrides(overrides);
       setMonthFlow(flow);
-      setCalendarDays(calDays);
 
       // F1-M.2 — sincronizar ejes con la preferencia del business.
       setIncomeAxis(getIncomeBreakdownAxis(biz));
@@ -314,6 +345,65 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   }, []);
 
   useEffect(() => { loadDashboardData(); }, [loadDashboardData]);
+
+  // D-23.a — El calendario (solo modo simple) se recarga al montar y cada vez
+  // que el ancla cambia (navegación de mes). Owner único de `calendarDays`.
+  useEffect(() => {
+    if (!businessId || !business) return;
+    if (getDetailLevel(business) !== 'simple') return;
+    loadCalendarMonth(businessId, calendarAnchor);
+  }, [businessId, business, calendarAnchor, loadCalendarMonth]);
+
+  /** D-23.a — Navegación de mes (chevrons ‹ ›). Solo cambia el ancla (el efecto
+   *  recarga); NO toca el filtro activo (period/customRange) — preserva G-1.
+   *  Telemetría F1-N: solo la dirección, sin fechas. */
+  const handleCalendarNav = (delta: 'prev' | 'next') => {
+    setCalendarAnchor(prev => shiftMonthISO(prev, delta === 'prev' ? -1 : 1));
+    if (businessId) eventsRepo.track(businessId, 'calendar_nav', { delta });
+  };
+
+  /** D-23.a — "Hoy": vuelve el calendario al mes actual. No altera el filtro. */
+  const handleCalendarToday = () => setCalendarAnchor(todayLocalISO());
+
+  /** D-23.b1 — ampliar/contraer la vista del calendario. Escritorio: full-width
+   *  sobre las 2 columnas; móvil: full-screen (ModalShell). No toca el filtro
+   *  (preserva G-1). Telemetría F1-N: solo el flag, sin fechas. */
+  const handleExpandCalendar = () => {
+    setExpandedCalendar(true);
+    if (businessId) eventsRepo.track(businessId, 'calendar_expand', { expanded: true });
+  };
+  const handleContractCalendar = () => {
+    setExpandedCalendar(false);
+    if (businessId) eventsRepo.track(businessId, 'calendar_expand', { expanded: false });
+  };
+
+  /**
+   * D-23.b1 — clic en la celda de NETO semanal de la vista expandida → filtra el
+   * dashboard a ESA semana (pedido CEO 2026-06-13: "para filtrar ingresos y
+   * salidas y verla en detalle"). Reusa la maquinaria de rango como el tap-tap;
+   * el rango resalta la semana en la grilla. resolveRange/MiPlata cuentan solo
+   * lo ya ocurrido, así que incluir días futuros de la fila es inofensivo.
+   */
+  const handleWeekPress = (weekStart: string, weekEnd: string) => {
+    const range = { start: weekStart, end: weekEnd };
+    setCustomRange(range);
+    if (business) loadSelection(business, resolveRange(range));
+    if (businessId) eventsRepo.track(businessId, 'calendar_filter', { kind: 'week' });
+  };
+
+  /**
+   * D-23.a — "Ver [mes]": filtra el dashboard al MES COMPLETO que muestra el
+   * calendario, de un toque (sin tap-tap entre fechas). Reusa la maquinaria de
+   * rango: `resolveRange('month', anchor)` da el mes completo + comparativa
+   * contra el mes anterior + label de mes (no un rango de fechas suelto). El
+   * customRange resultante resalta el mes en la grilla. Cero IT (P-010).
+   */
+  const handleViewMonth = () => {
+    const range = resolveRange('month', parseLocalISODate(calendarAnchor));
+    setCustomRange({ start: range.start, end: range.end });
+    if (business) loadSelection(business, range);
+    if (businessId) eventsRepo.track(businessId, 'calendar_filter', { kind: 'month' });
+  };
 
   /** Cambio de período en el SegmentedControl ÚNICO (G-1) — recarga flow +
    *  MiPlata en simple, hero en detailed. Un reloj, todo sincronizado. */
@@ -393,9 +483,22 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
     setEditingOrder(null);
     setOrdersDayDate(null);
     // F1-O: la memo del calendario es estable por mes → invalidar tras una
-    // escritura para que loadDashboardData traiga los agregados frescos.
-    if (businessId) analyticsRepo.invalidateCalendarMonth(businessId);
-    loadDashboardData();
+    // escritura para traer los agregados frescos. D-23.a: refrescar el mes
+    // ANCLADO (no necesariamente el de hoy), que es el owner del efecto.
+    if (businessId) {
+      analyticsRepo.invalidateCalendarMonth(businessId);
+      loadCalendarMonth(businessId, calendarAnchor);
+    }
+    // Issue 2 — tras una escritura, recargar respetando el filtro ACTIVO
+    // (customRange || period). `loadDashboardData` usa el período inicial (memo
+    // []); en modo simple sobre-escribimos Flow/MiPlata/movimientos con la
+    // selección vigente. Corrige además el revert pre-existente de Flow/MiPlata
+    // a "mes" cuando había un rango custom activo.
+    loadDashboardData().then(() => {
+      if (business && getDetailLevel(business) === 'simple') {
+        loadSelection(business, customRange ? resolveRange(customRange) : period);
+      }
+    });
   };
 
   /**
@@ -577,28 +680,105 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
   // Mismos componentes, misma data; cambia solo la disposición.
 
   // F1-O / D-19 — widget calendario (escritorio; móvil colapsable = 1D).
+  // D-23.a — ancla navegable + "Hoy" (solo si el ancla no es el mes actual).
+  const calendarIsCurrentMonth = calendarAnchor.slice(0, 7) === todayLocalISO().slice(0, 7);
+
+  /** D-23.a/b1 — controles bajo el calendario (compacto o expandido): chip de
+   *  rango activo con "Limpiar" + botón "Ver [mes]" para filtrar el mes pasado
+   *  completo de un toque. Compartido por ambas vistas (DRY). */
+  const renderCalendarFooterControls = () => {
+    // D-23.a — "Ver [mes]": un toque para filtrar el mes pasado COMPLETO (sin
+    // tap-tap entre fechas — pedido CEO). Solo para meses PASADOS (el actual ya
+    // lo cubre el chip "Mes"; el futuro no tiene plata que ver). Se oculta si el
+    // mes mostrado ya es el rango filtrado (evita el botón redundante).
+    const calendarIsPastMonth = calendarAnchor.slice(0, 7) < todayLocalISO().slice(0, 7);
+    const anchorMonth = resolveRange('month', parseLocalISODate(calendarAnchor));
+    const customIsAnchorMonth =
+      customRange != null &&
+      customRange.start === anchorMonth.start &&
+      customRange.end === anchorMonth.end;
+    const showViewMonth = calendarIsPastMonth && !customIsAnchorMonth;
+    const monthName = parseLocalISODate(calendarAnchor).toLocaleString('es-AR', { month: 'long' });
+
+    return (
+      <>
+        {customRange ? (
+          <Stack direction="row" justify="space-between" align="center" style={{ marginTop: space['3'] }}>
+            <Text variant="caption" color="secondary">{resolveRange(customRange).label}</Text>
+            <TouchableOpacity
+              onPress={() => handlePeriodChange('month')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              activeOpacity={0.7}
+            >
+              <Text variant="caption" color="accent">Limpiar ✕</Text>
+            </TouchableOpacity>
+          </Stack>
+        ) : null}
+        {showViewMonth ? (
+          <View style={{ alignItems: 'center', marginTop: space['3'] }}>
+            <Button variant="primary" size="sm" onPress={handleViewMonth}>
+              {`Ver ${monthName}`}
+            </Button>
+          </View>
+        ) : null}
+      </>
+    );
+  };
+
   const renderCalendar = () => (
     <Card variant="surface" padding="lg">
       <CalendarMonth
-        anchor={todayLocalISO()}
+        anchor={calendarAnchor}
         today={todayLocalISO()}
         days={calendarDays}
         selection={calendarSelection}
         onDayPress={handleCalendarDayPress}
+        onPrevMonth={() => handleCalendarNav('prev')}
+        onNextMonth={() => handleCalendarNav('next')}
+        onToday={calendarIsCurrentMonth ? undefined : handleCalendarToday}
+        onExpand={handleExpandCalendar}
+        formatMoney={formatMoney}
       />
-      {customRange ? (
-        <Stack direction="row" justify="space-between" align="center" style={{ marginTop: space['3'] }}>
-          <Text variant="caption" color="secondary">{resolveRange(customRange).label}</Text>
-          <TouchableOpacity
-            onPress={() => handlePeriodChange('month')}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            activeOpacity={0.7}
-          >
-            <Text variant="caption" color="accent">Limpiar ✕</Text>
-          </TouchableOpacity>
-        </Stack>
-      ) : null}
+      {renderCalendarFooterControls()}
     </Card>
+  );
+
+  /** D-23.b1 — vista expandida (montos por día + neto semanal + totales del mes).
+   *  Misma data y mismos handlers que el compacto; el clic en la celda semanal
+   *  filtra esa semana (handleWeekPress). El padre gobierna la selección. */
+  const renderCalendarExpanded = () => (
+    <Card variant="surface" padding="lg">
+      <CalendarMonthExpanded
+        anchor={calendarAnchor}
+        today={todayLocalISO()}
+        days={calendarDays}
+        selection={calendarSelection}
+        onDayPress={handleCalendarDayPress}
+        onWeekPress={handleWeekPress}
+        onPrevMonth={() => handleCalendarNav('prev')}
+        onNextMonth={() => handleCalendarNav('next')}
+        onToday={calendarIsCurrentMonth ? undefined : handleCalendarToday}
+        onContract={handleContractCalendar}
+      />
+      {renderCalendarFooterControls()}
+    </Card>
+  );
+
+  /** D-23.b2 — móvil: la vista expandida abre full-screen sobre un ModalShell
+   *  (reusa backdrop/Esc/back del DS). Scroll interno por si la grilla + footer
+   *  no entran. El ícono "contraer" de la cabecera cierra. */
+  const renderCalendarModalMobile = () => (
+    <ModalShell
+      visible={!isWide && expandedCalendar}
+      onClose={handleContractCalendar}
+      placement="sheet"
+    >
+      <View style={styles.calModalPanel}>
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {renderCalendarExpanded()}
+        </ScrollView>
+      </View>
+    </ModalShell>
   );
 
   const renderMiPlata = () =>
@@ -653,24 +833,57 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
       />
     ) : null;
 
-  const renderMovimientos = () =>
-    recentTransactions.length === 0 ? (
-      <Stack gap="2" align="center" style={{
-        backgroundColor: token.bg.raised,
-        borderRadius: radius.lg,
-        padding: space['6'],
-      }}>
-        <Heading level={4} align="center">
-          Cargá tu primer movimiento para empezar
-        </Heading>
-        <Text variant="caption" color="secondary" align="center">
-          Usá el botón + abajo a la derecha cuando cobres, pagues o trabajes.
-        </Text>
-      </Stack>
-    ) : (
+  const renderMovimientos = () => {
+    // Issue 2 — la lista sigue el filtro activo (calendario/selector). Con filtro,
+    // el título refleja el rango y el vacío dice "en este período" (no el
+    // onboarding "cargá tu primer movimiento", que solo aplica al default "Mes").
+    const rangeLabel = customRange
+      ? resolveRange(customRange).label
+      : period !== 'month'
+        ? resolveRange(period).label
+        : null;
+    const isFiltered = rangeLabel != null;
+    const heading = isFiltered ? `Movimientos · ${rangeLabel}` : 'Últimos movimientos';
+
+    if (recentTransactions.length === 0) {
+      // Default vacío = negocio sin movimientos → onboarding. Filtrado vacío =
+      // el período no tiene movimientos (pero el negocio sí puede tener otros).
+      return isFiltered ? (
+        <View>
+          <Text variant="micro" color="secondary" uppercase style={{ marginBottom: space['2'] }}>
+            {heading}
+          </Text>
+          <View style={{
+            backgroundColor: token.bg.raised,
+            borderRadius: radius.lg,
+            padding: space['5'],
+            alignItems: 'center',
+          }}>
+            <Text variant="caption" color="secondary" align="center">
+              Sin movimientos en este período.
+            </Text>
+          </View>
+        </View>
+      ) : (
+        <Stack gap="2" align="center" style={{
+          backgroundColor: token.bg.raised,
+          borderRadius: radius.lg,
+          padding: space['6'],
+        }}>
+          <Heading level={4} align="center">
+            Cargá tu primer movimiento para empezar
+          </Heading>
+          <Text variant="caption" color="secondary" align="center">
+            Usá el botón + abajo a la derecha cuando cobres, pagues o trabajes.
+          </Text>
+        </Stack>
+      );
+    }
+
+    return (
       <View>
         <Text variant="micro" color="secondary" uppercase style={{ marginBottom: space['2'] }}>
-          Últimos movimientos
+          {heading}
         </Text>
         <TransactionList
           transactions={recentTransactions}
@@ -681,6 +894,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
         />
       </View>
     );
+  };
 
   const renderDetailHint = () => (
     <TouchableOpacity
@@ -700,6 +914,11 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
       //    (MiPlata + Ingresos/Costos); derecha = historia (Balance con
       //    gráfico + últimos movimientos). El ojo lee F: estado → relato.
       <>
+        {/* D-23.b1 — expandido: ocupa el ancho de las 2 columnas, sobre la
+            grilla. El compacto sale de la columna izquierda mientras tanto. */}
+        {expandedCalendar ? (
+          <View style={{ marginTop: space['4'] }}>{renderCalendarExpanded()}</View>
+        ) : null}
         <View
           style={{
             flexDirection: 'row',
@@ -709,7 +928,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
           }}
         >
           <Stack gap="3" style={{ flex: 5 }}>
-            {renderCalendar()}
+            {expandedCalendar ? null : renderCalendar()}
             {renderMiPlata()}
             {renderFlowPair()}
           </Stack>
@@ -787,19 +1006,21 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
           })}
 
           {/* F1-O/D-21.a — pedidos de clientes: la palabra del usuario es
-              "Pedido" (naming spec §4.7.bis). Acento teal de marca. */}
+              "Pedido" (naming spec §4.7.bis). Violeta `info` para coincidir con
+              los badges de pedidos del calendario (§4.9.b). [Item 2] */}
           <TouchableOpacity
-            style={[styles.pickerItem, { borderLeftColor: token.accent.base }]}
+            style={[styles.pickerItem, { borderLeftColor: token.info.base }]}
             onPress={() => { setShowMoreOptions(false); setActiveModal('order'); }}
             activeOpacity={0.75}
           >
-            <Ionicons name="calendar-number-outline" size={22} color={token.accent.base} style={styles.pickerIcon} />
+            <Ionicons name="calendar-number-outline" size={22} color={token.info.base} style={styles.pickerIcon} />
             <View style={styles.pickerTextWrap}>
               <RNText style={styles.pickerItemTitle}>Pedido</RNText>
               <RNText style={styles.pickerItemSub}>Te encargaron algo con fecha de entrega</RNText>
             </View>
           </TouchableOpacity>
 
+          {/* RESERVED: Horas — for Estadísticas page and Chofer profile
           <TouchableOpacity
             style={[styles.pickerItem, { borderLeftColor: token.info.base }]}
             onPress={() => { setShowMoreOptions(false); setActiveModal('hours'); }}
@@ -811,6 +1032,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
               <RNText style={styles.pickerItemSub}>El tiempo que le dedicaste</RNText>
             </View>
           </TouchableOpacity>
+          */}
 
           <TouchableOpacity
             style={styles.moreToggle}
@@ -884,14 +1106,11 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
             </Stack>
 
             <Stack direction="row" align="center" gap="3">
-              {/* D-3: Ionicons reemplaza emojis de chrome (consistencia cross-platform). */}
+              {/* D-3: Ionicons reemplaza emojis de chrome (consistencia cross-platform).
+                  Issue 3 (2026-06-13): "Salir" se movió a Perfil (con confirmación);
+                  el header solo conserva el acceso a Ajustes. */}
               <TouchableOpacity onPress={onOpenSettings} activeOpacity={0.7}>
                 <Ionicons name="settings-outline" size={20} color={token.text.secondary} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={async () => { await supabase.auth.signOut(); onSignOut(); }}
-              >
-                <Text variant="caption" color="tertiary">Salir</Text>
               </TouchableOpacity>
             </Stack>
           </Stack>
@@ -991,6 +1210,7 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
 
       <FAB onPress={openPicker} />
       {renderActionPicker()}
+      {renderCalendarModalMobile()}
 
       {activeModal === 'sales' && businessId.length > 0 && (
         <SaleForm
@@ -1038,12 +1258,14 @@ export default function DashboardScreen({ onSignOut, onOpenSettings, onOpenHisto
         onClose={() => setActiveModal(null)}
         onSuccess={closeModal}
       />
+      {/* RESERVED: Horas — for Estadísticas page and Chofer profile
       <QuickHoursForm
         businessId={businessId}
         visible={activeModal === 'hours'}
         onClose={() => setActiveModal(null)}
         onSuccess={closeModal}
       />
+      */}
     </SafeAreaView>
   );
 }
@@ -1076,6 +1298,19 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   handle:      { width: 36, height: 4, borderRadius: 2, backgroundColor: '#2A2A4A', alignSelf: 'center', marginBottom: 16 },
+
+  /* D-23.b2 — panel del calendario expandido en móvil (sheet casi full-screen). */
+  calModalPanel: {
+    backgroundColor: token.bg.base,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 16,
+    paddingBottom: 28,
+    width: '100%',
+    maxWidth: 640,
+    maxHeight: '92%',
+    alignSelf: 'center',
+  },
   pickerTitle: { color: '#FFF', fontSize: 17, fontWeight: 'bold', marginBottom: 18, textAlign: 'center' },
   pickerItem: {
     flexDirection: 'row',

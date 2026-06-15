@@ -113,12 +113,21 @@ export const color = {
     subtle: 'rgba(245,158,11,0.10)',
   },
 
-  /** Violeta "info / count" — métricas tipo "ticket promedio". */
+  /** Violeta "info / count / PEDIDOS" — también el badge de pedidos del
+   *  calendario (D-23.b): violeta para NO confundirse con el verde de ingresos. */
   info: {
     base: '#8B5CF6',
     hover: '#7C3AED',
     muted: '#4C1D95',
     subtle: 'rgba(139,92,246,0.10)',
+  },
+
+  /** Selección de día/rango/semana en el calendario (D-23.b, decisión CEO
+   *  2026-06-13): slate azulado atenuado — NO el verde `accent.subtle`, que
+   *  competía con los ingresos en el pantallazo rápido. */
+  selection: {
+    subtle: 'rgba(125,142,178,0.20)',
+    strong: 'rgba(125,142,178,0.32)',
   },
 } as const;
 

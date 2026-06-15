@@ -27,7 +27,7 @@
  */
 
 import {
-  TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   Text,
   type ViewStyle,
@@ -35,6 +35,7 @@ import {
   type TextStyle,
 } from 'react-native';
 import { color, radius, space, text as tokenText } from '../tokens';
+import { useHover } from '../useHover';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 type Size = 'sm' | 'md' | 'lg';
@@ -111,6 +112,14 @@ const VARIANT_STYLES: Record<Variant, Style> = {
   },
 };
 
+/** D-20.a — fondo en hover (web). Native nunca lo dispara (useHover). */
+const HOVER_BG: Record<Variant, string> = {
+  primary: color.accent.hover,
+  secondary: color.bg.elevated,
+  ghost: color.accent.subtle,
+  danger: color.danger.hover,
+};
+
 export default function Button({
   children,
   onPress,
@@ -126,23 +135,27 @@ export default function Button({
   const sz = SIZE_STYLES[size];
   const vr = VARIANT_STYLES[variant];
   const isInactive = disabled || loading;
+  const { hovered, hoverHandlers } = useHover();
 
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={isInactive ? undefined : onPress}
-      activeOpacity={0.85}
       disabled={isInactive}
-      style={[
+      {...hoverHandlers}
+      style={({ pressed }) => [
         {
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
           gap: space['2'],
           alignSelf: fullWidth ? 'stretch' : 'flex-start',
-          opacity: isInactive ? 0.4 : 1,
+          // Native conserva el feedback pressed (antes activeOpacity 0.85).
+          opacity: isInactive ? 0.4 : pressed ? 0.85 : 1,
         },
         sz.container,
         vr.container,
+        // Hover (web) — pisa el bg de la variante. Native: hovered siempre false.
+        hovered && !isInactive ? { backgroundColor: HOVER_BG[variant] } : null,
         style,
       ]}
     >
@@ -155,6 +168,6 @@ export default function Button({
           {rightIcon ? <Text style={[sz.label, vr.label]}>{rightIcon}</Text> : null}
         </>
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
 }

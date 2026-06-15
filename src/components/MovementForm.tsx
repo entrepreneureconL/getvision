@@ -33,6 +33,7 @@ import { resolveCategory } from '../utils/transactionCategories';
 import { todayLocalISO } from '../utils/periods';
 import type { Account } from '../schemas/account';
 import type { Transaction } from '../schemas/transaction';
+import { ModalShell } from '../design';
 
 const { width } = Dimensions.get('window');
 const FORM_WIDTH = Math.min(400, width - 48);
@@ -111,6 +112,12 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
 
   const amountNumber = parseFloat(amount.replace(',', '.'));
   const baseCanSubmit = !isNaN(amountNumber) && amountNumber > 0 && !loading;
+
+  // D-20.b — ¿cambios sin guardar? Solo las tabs de carga (Aporte/Retiro/
+  // Transfer.) tienen input que perder; la tab Pendientes solo salda items ya
+  // persistidos (cerrar ahí es seguro). Backdrop/Esc piden confirmación; el ×
+  // cierra directo (handleClose, que refresca si hubo settles).
+  const dirty = activeTab !== 'Pendientes' && (amount.trim() !== '' || description.trim() !== '');
 
   // Reseteo de form después de guardar exitoso.
   const resetForm = () => {
@@ -217,7 +224,7 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
   };
 
   return (
-    <View style={styles.overlay}>
+    <ModalShell visible onClose={handleClose} dirty={dirty}>
       <View style={styles.panel}>
 
         <View style={styles.panelHeader}>
@@ -494,7 +501,7 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
 
         </ScrollView>
       </View>
-    </View>
+    </ModalShell>
   );
 }
 
@@ -699,11 +706,7 @@ function PendingRow({
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end', zIndex: 100,
-  },
+  // D-20.b — el overlay/backdrop ahora lo provee <ModalShell/> (#16).
   panel: {
     backgroundColor: '#12122A', borderTopLeftRadius: 24,
     borderTopRightRadius: 24, padding: 24, maxHeight: '90%',

@@ -15,9 +15,10 @@
  * cuál de los dos renderizar según el breakpoint.
  */
 
-import { View, TouchableOpacity } from 'react-native';
+import { View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { color, radius, space, text as tokenText } from '../tokens';
+import { useHover } from '../useHover';
 import DSText from './Text';
 import type { TabItem } from './TabBar';
 
@@ -28,6 +29,10 @@ type Props<T extends string> = {
 };
 
 export default function SideNav<T extends string>({ items, active, onChange }: Props<T>) {
+  // Item 4: el último ítem (Perfil) se ancla al fondo del sidebar; el resto
+  // queda agrupado arriba bajo la marca.
+  const mainItems = items.slice(0, -1);
+  const bottomItem = items.length > 0 ? items[items.length - 1] : undefined;
   return (
     <View
       style={{
@@ -61,45 +66,93 @@ export default function SideNav<T extends string>({ items, active, onChange }: P
         </DSText>
       </View>
 
-      {/* ── Ítems ── */}
+      {/* ── Ítems principales ── */}
       <View style={{ gap: space['1'] }}>
-        {items.map(item => {
-          const isActive = item.key === active;
-          return (
-            <TouchableOpacity
-              key={item.key}
-              onPress={() => onChange(item.key)}
-              activeOpacity={0.7}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: space['3'],
-                paddingVertical: space['3'],
-                paddingHorizontal: space['3'],
-                borderRadius: radius.md,
-                backgroundColor: isActive ? color.accent.subtle : 'transparent',
-              }}
-            >
-              <Ionicons
-                name={isActive ? item.iconActive : item.icon}
-                size={20}
-                color={isActive ? color.accent.base : color.text.tertiary}
-              />
-              <DSText
-                variant="bodyStrong"
-                style={{
-                  color: isActive ? color.accent.base : color.text.secondary,
-                  fontWeight: (isActive
-                    ? tokenText.weight.semibold
-                    : tokenText.weight.medium) as '600' | '500',
-                }}
-              >
-                {item.label}
-              </DSText>
-            </TouchableOpacity>
-          );
-        })}
+        {mainItems.map(item => (
+          <SideNavItem
+            key={item.key}
+            item={item}
+            isActive={item.key === active}
+            onPress={() => onChange(item.key)}
+          />
+        ))}
       </View>
+
+      {/* Empuja el último ítem (Perfil) al fondo del sidebar — patrón de
+          escritorio "cuenta/perfil abajo" (ref. CoinMarketCap/iCloud). En móvil
+          la TabBar ya lo tiene en la última posición (extremo derecho). [Item 4] */}
+      <View style={{ flex: 1 }} />
+
+      {bottomItem ? (
+        <View style={{ gap: space['1'], paddingBottom: space['6'] }}>
+          <SideNavItem
+            key={bottomItem.key}
+            item={bottomItem}
+            isActive={bottomItem.key === active}
+            onPress={() => onChange(bottomItem.key)}
+          />
+        </View>
+      ) : null}
     </View>
+  );
+}
+
+/**
+ * Un ítem del SideNav. Extraído para usar `useHover` por ítem (D-20.a): el
+ * inactivo gana fondo accent.subtle + texto/ícono text.primary bajo el cursor
+ * (web). El activo (accent) no cambia. Native: hover nunca dispara.
+ */
+function SideNavItem<T extends string>({
+  item,
+  isActive,
+  onPress,
+}: {
+  item: TabItem<T>;
+  isActive: boolean;
+  onPress: () => void;
+}) {
+  const { hovered, hoverHandlers } = useHover();
+  const showHover = !isActive && hovered;
+  const iconColor = isActive
+    ? color.accent.base
+    : showHover
+      ? color.text.primary
+      : color.text.tertiary;
+  const labelColor = isActive
+    ? color.accent.base
+    : showHover
+      ? color.text.primary
+      : color.text.secondary;
+  return (
+    <Pressable
+      onPress={onPress}
+      {...hoverHandlers}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space['3'],
+        paddingVertical: space['3'],
+        paddingHorizontal: space['3'],
+        borderRadius: radius.md,
+        backgroundColor: isActive || showHover ? color.accent.subtle : 'transparent',
+      }}
+    >
+      <Ionicons
+        name={isActive ? item.iconActive : item.icon}
+        size={20}
+        color={iconColor}
+      />
+      <DSText
+        variant="bodyStrong"
+        style={{
+          color: labelColor,
+          fontWeight: (isActive
+            ? tokenText.weight.semibold
+            : tokenText.weight.medium) as '600' | '500',
+        }}
+      >
+        {item.label}
+      </DSText>
+    </Pressable>
   );
 }

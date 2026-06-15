@@ -15,9 +15,10 @@
  * el contenedor (MainTabs). No sabe de pantallas ni de navegación.
  */
 
-import { View, TouchableOpacity } from 'react-native';
+import { View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { color, space, text as tokenText } from '../tokens';
+import { color, radius, space, text as tokenText } from '../tokens';
+import { useHover } from '../useHover';
 import DSText from './Text';
 
 export type TabItem<T extends string> = {
@@ -48,39 +49,67 @@ export default function TabBar<T extends string>({ items, active, onChange }: Pr
         paddingBottom: space['3'],
       }}
     >
-      {items.map(item => {
-        const isActive = item.key === active;
-        return (
-          <TouchableOpacity
-            key={item.key}
-            onPress={() => onChange(item.key)}
-            activeOpacity={0.7}
-            style={{
-              flex: 1,
-              alignItems: 'center',
-              gap: 2,
-              paddingVertical: space['1'],
-            }}
-          >
-            <Ionicons
-              name={isActive ? item.iconActive : item.icon}
-              size={22}
-              color={isActive ? color.accent.base : color.text.tertiary}
-            />
-            <DSText
-              variant="micro"
-              style={{
-                color: isActive ? color.accent.base : color.text.tertiary,
-                fontWeight: (isActive
-                  ? tokenText.weight.semibold
-                  : tokenText.weight.medium) as '600' | '500',
-              }}
-            >
-              {item.label}
-            </DSText>
-          </TouchableOpacity>
-        );
-      })}
+      {items.map(item => (
+        <TabBarItem
+          key={item.key}
+          item={item}
+          isActive={item.key === active}
+          onPress={() => onChange(item.key)}
+        />
+      ))}
     </View>
+  );
+}
+
+/**
+ * Un ítem de la TabBar. Extraído para usar `useHover` por ítem (D-20.a): el
+ * inactivo sube de text.tertiary → text.primary bajo el cursor (web). El activo
+ * (accent) no cambia. Native: hover nunca dispara.
+ */
+function TabBarItem<T extends string>({
+  item,
+  isActive,
+  onPress,
+}: {
+  item: TabItem<T>;
+  isActive: boolean;
+  onPress: () => void;
+}) {
+  const { hovered, hoverHandlers } = useHover();
+  const tint = isActive
+    ? color.accent.base
+    : hovered
+      ? color.text.primary
+      : color.text.tertiary;
+  return (
+    <Pressable
+      onPress={onPress}
+      {...hoverHandlers}
+      style={{
+        flex: 1,
+        alignItems: 'center',
+        gap: 2,
+        paddingVertical: space['1'],
+        borderRadius: radius.md,
+        backgroundColor: !isActive && hovered ? color.accent.subtle : 'transparent',
+      }}
+    >
+      <Ionicons
+        name={isActive ? item.iconActive : item.icon}
+        size={22}
+        color={tint}
+      />
+      <DSText
+        variant="micro"
+        style={{
+          color: tint,
+          fontWeight: (isActive
+            ? tokenText.weight.semibold
+            : tokenText.weight.medium) as '600' | '500',
+        }}
+      >
+        {item.label}
+      </DSText>
+    </Pressable>
   );
 }

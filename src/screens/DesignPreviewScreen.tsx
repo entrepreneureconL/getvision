@@ -15,6 +15,8 @@
 
 import { useState } from 'react';
 import { ScrollView, View, SafeAreaView, StyleSheet } from 'react-native';
+import { shiftMonthISO } from '../utils/periods';
+import { formatMoney } from '../components/Money';
 import PeriodBalanceCard from '../components/PeriodBalanceCard';
 import FlowPairSection from '../components/FlowPairSection';
 import type { BreakdownAxis } from '../schemas/business';
@@ -22,14 +24,19 @@ import type { FlowSeriesPoint, MonthFlowResult } from '../repos/analytics';
 import {
   Heading,
   Text,
+  Stack,
   Card,
+  Button,
   PeriodBars,
   TabBar,
   SideNav,
   ProportionList,
   CalendarMonth,
+  CalendarMonthExpanded,
+  ModalShell,
   color,
   space,
+  radius,
   type TabItem,
   type CalendarDayData,
 } from '../design';
@@ -106,6 +113,7 @@ const CALENDAR_TODAY = '2026-06-11';
 const CALENDAR_DAYS: CalendarDayData[] = [
   { date: '2026-06-02', income: 65000,  expense: 0,     ordersCount: 0 },
   { date: '2026-06-03', income: 0,      expense: 42000, ordersCount: 0 },
+  { date: '2026-06-04', income: 0,      expense: 0,     ordersCount: 1 }, // D-23.a: pasado pending = VENCIDO (badge warning)
   { date: '2026-06-05', income: 120000, expense: 30000, ordersCount: 0 },
   { date: '2026-06-08', income: 88000,  expense: 0,     ordersCount: 0 },
   { date: '2026-06-09', income: 0,      expense: 15000, ordersCount: 0 },
@@ -124,6 +132,12 @@ export default function DesignPreviewScreen() {
     start: '2026-06-08',
     end: '2026-06-11',
   });
+  // D-23.a — ancla navegable de la galería (los mocks son de junio; navegar a
+  // otros meses muestra la grilla vacía — verifica que los chevrons funcionan).
+  const [calAnchor, setCalAnchor] = useState('2026-06-11');
+  // D-20.b — demo de ModalShell: abrir + toggle dirty para probar el confirm.
+  const [shellOpen, setShellOpen] = useState(false);
+  const [shellDirty, setShellDirty] = useState(false);
   const handleCalPress = (date: string) => {
     setCalSel(prev => {
       // Sin selección o ya es rango → arranca selección nueva de un día.
@@ -142,7 +156,7 @@ export default function DesignPreviewScreen() {
           Galería de primitivos con datos mock. No toca Supabase.
         </Text>
 
-        <Section title="PeriodBars — semana (hoy enfatizado + prom)">
+        <Section title="PeriodBars — semana (hoy enfatizado + prom + hover D-20.a)">
           <Card padding="lg">
             <PeriodBars
               points={WEEK_SERIES.map(p => ({
@@ -151,6 +165,7 @@ export default function DesignPreviewScreen() {
               }))}
               avgLine={71000}
               avgLabel="prom"
+              formatMoney={formatMoney}
             />
           </Card>
         </Section>
@@ -192,14 +207,18 @@ export default function DesignPreviewScreen() {
           />
         </Section>
 
-        <Section title="CalendarMonth — mes con puntos, hoy y rango (D-19, tap-tap)">
+        <Section title="CalendarMonth — puntos, hoy, rango, navegación de mes + vencidos (D-19 / D-23.a)">
           <Card padding="lg">
             <CalendarMonth
-              anchor={CALENDAR_TODAY}
+              anchor={calAnchor}
               today={CALENDAR_TODAY}
               days={CALENDAR_DAYS}
               selection={calSel}
               onDayPress={handleCalPress}
+              onPrevMonth={() => setCalAnchor(shiftMonthISO(calAnchor, -1))}
+              onNextMonth={() => setCalAnchor(shiftMonthISO(calAnchor, 1))}
+              onToday={calAnchor.slice(0, 7) === CALENDAR_TODAY.slice(0, 7) ? undefined : () => setCalAnchor(CALENDAR_TODAY)}
+              formatMoney={formatMoney}
             />
             <Text variant="micro" color="tertiary" style={{ marginTop: space['3'] }}>
               {calSel
@@ -209,6 +228,62 @@ export default function DesignPreviewScreen() {
                 : 'Sin selección'}
             </Text>
           </Card>
+        </Section>
+
+        <Section title="CalendarMonthExpanded — vista expandida 2 columnas (D-23.b1, #17)">
+          <Card padding="lg">
+            <CalendarMonthExpanded
+              anchor={CALENDAR_TODAY}
+              today={CALENDAR_TODAY}
+              days={CALENDAR_DAYS}
+              selection={calSel}
+              onDayPress={handleCalPress}
+              onWeekPress={(s, e) => setCalSel({ start: s, end: e })}
+              onPrevMonth={() => {}}
+              onNextMonth={() => {}}
+              onToday={undefined}
+              onContract={() => {}}
+              comparisonLabel="mayo"
+              comparisonPct={18}
+            />
+          </Card>
+        </Section>
+
+        <Section title="ModalShell — backdrop/Esc/dirty-confirm (D-20.b, #16)">
+          <Card padding="lg">
+            <Stack gap="3">
+              <Button variant="secondary" size="sm" onPress={() => setShellDirty(d => !d)}>
+                {shellDirty ? 'dirty = SÍ (clic afuera pregunta)' : 'dirty = no (clic afuera cierra)'}
+              </Button>
+              <Button variant="primary" size="sm" onPress={() => setShellOpen(true)}>
+                Abrir ModalShell
+              </Button>
+              <Text variant="micro" color="tertiary">
+                Probar: clic en el backdrop oscuro, tecla Esc, y el botón Cerrar — con dirty ON debe pedir confirmación.
+              </Text>
+            </Stack>
+          </Card>
+          <ModalShell visible={shellOpen} onClose={() => setShellOpen(false)} dirty={shellDirty} avoidKeyboard>
+            <View
+              style={{
+                backgroundColor: color.bg.raised,
+                borderTopLeftRadius: radius.xl,
+                borderTopRightRadius: radius.xl,
+                padding: space['5'],
+                paddingBottom: space['8'],
+              }}
+            >
+              <Stack gap="3">
+                <Heading level={3} color="primary">Panel de ejemplo</Heading>
+                <Text variant="body" color="secondary">
+                  Clic afuera / Esc / back cierran (o preguntan si dirty). Tocar acá adentro NO cierra.
+                </Text>
+                <Button variant="primary" size="md" fullWidth onPress={() => setShellOpen(false)}>
+                  Cerrar (explícito)
+                </Button>
+              </Stack>
+            </View>
+          </ModalShell>
         </Section>
 
         <Section title="TabBar — navegación inferior (D-4, Ionicons)">

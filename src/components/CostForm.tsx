@@ -19,6 +19,7 @@ import AddCategoryModal from './AddCategoryModal';
 import type { Transaction } from '../schemas/transaction';
 import type { Account } from '../schemas/account';
 import type { CategoryOverride } from '../schemas/categoryOverride';
+import { ModalShell } from '../design';
 
 const { width } = Dimensions.get('window');
 const FORM_WIDTH = Math.min(400, width - 48);
@@ -100,6 +101,19 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction, 
     && !loading
     && (!isSettled || accountId != null);
 
+  // D-20.b — ¿cambios sin guardar? (mismo criterio que SaleForm). Backdrop/Esc
+  // piden confirmación antes de descartar; el × cierra directo.
+  const initialAmountStr = transaction ? String(transaction.amount).replace('.', ',') : '';
+  const initialDate = transaction?.date ?? todayLocalISO();
+  const initialSettled = isEdit ? transaction!.settled_at != null : true;
+  const dirty = isEdit
+    ? amount !== initialAmountStr
+      || description !== (transaction?.description ?? '')
+      || category !== initialCategory
+      || date !== initialDate
+      || isSettled !== initialSettled
+    : amount.trim() !== '' || description.trim() !== '';
+
   const handleSave = async () => {
     if (!canSubmit) return;
     setLoading(true);
@@ -175,7 +189,8 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction, 
   };
 
   return (
-    <View style={styles.overlay}>
+    <>
+    <ModalShell visible onClose={onClose} dirty={dirty}>
       <View style={styles.panel}>
         <View style={styles.panelHeader}>
           <Text style={styles.panelTitle}>{isEdit ? 'Editar costo' : 'Nuevo costo'}</Text>
@@ -339,30 +354,28 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction, 
           </TouchableOpacity>
         </View>
       </View>
+    </ModalShell>
 
-      {/* F1-L: modal de creación de categoría custom. */}
-      <AddCategoryModal
-        visible={showAddCategory}
-        businessId={businessId}
-        type="expense"
-        rubro={rubro}
-        existingOverrides={overrides}
-        onClose={() => setShowAddCategory(false)}
-        onCreated={(created) => {
-          setOverrides(prev => [...prev, created]);
-          setCategory(created.value);
-        }}
-      />
-    </View>
+    {/* F1-L: modal de creación de categoría custom. Fuera del ModalShell para
+        no anidar Modals. */}
+    <AddCategoryModal
+      visible={showAddCategory}
+      businessId={businessId}
+      type="expense"
+      rubro={rubro}
+      existingOverrides={overrides}
+      onClose={() => setShowAddCategory(false)}
+      onCreated={(created) => {
+        setOverrides(prev => [...prev, created]);
+        setCategory(created.value);
+      }}
+    />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end', zIndex: 100,
-  },
+  // D-20.b — el overlay/backdrop ahora lo provee <ModalShell/> (#16).
   panel: {
     backgroundColor: '#12122A', borderTopLeftRadius: 24,
     borderTopRightRadius: 24, padding: 18, paddingBottom: 0,

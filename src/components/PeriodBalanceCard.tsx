@@ -58,7 +58,6 @@ export default function PeriodBalanceCard({
   expense,
   period,
   series,
-  prevDailyAvgIncome = 0,
   prevIncome,
   prevExpense,
   prevLabel,
@@ -128,8 +127,8 @@ export default function PeriodBalanceCard({
           <View style={{ marginTop: space['4'] }}>
             <PeriodBars
               points={barPoints}
-              avgLine={prevDailyAvgIncome}
-              avgLabel="prom"
+              layout="grouped"
+              formatMoney={formatMoney}
             />
           </View>
 
@@ -147,11 +146,7 @@ export default function PeriodBalanceCard({
             <Text variant="micro" color="tertiary">Ingresos</Text>
             <LegendDot tint={color.danger.base} />
             <Text variant="micro" color="tertiary">Costos</Text>
-            {prevDailyAvgIncome > 0 ? (
-              <Text variant="micro" color="tertiary">
-                ┄ prom. {prevLabel ?? 'período anterior'}
-              </Text>
-            ) : null}
+            <Text variant="micro" color="tertiary">┄ Prom del mes</Text>
           </View>
         </>
       ) : null}

@@ -32,8 +32,9 @@
  *   />
  */
 
-import { View, TouchableOpacity, type ViewStyle, type StyleProp } from 'react-native';
+import { View, Pressable, type ViewStyle, type StyleProp } from 'react-native';
 import { color, radius, space, text as tokenText } from '../tokens';
+import { useHover } from '../useHover';
 import DSText from './Text';
 
 type Option<T extends string> = {
@@ -85,36 +86,68 @@ export default function SegmentedControl<T extends string>({
         style,
       ]}
     >
-      {options.map((opt) => {
-        const isActive = opt.value === value;
-        return (
-          <TouchableOpacity
-            key={opt.value}
-            onPress={() => onChange(opt.value)}
-            activeOpacity={0.85}
-            style={{
-              flex: fullWidth ? 1 : undefined,
-              height: SIZE_HEIGHT[size],
-              borderRadius: radius.pill,
-              backgroundColor: isActive ? color.bg.elevated : 'transparent',
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingHorizontal: space['3'],
-            }}
-          >
-            <DSText
-              variant={size === 'sm' ? 'caption' : 'body'}
-              color={isActive ? 'primary' : 'secondary'}
-              style={{
-                fontSize: SIZE_TEXT[size],
-                fontWeight: isActive ? '600' : '500',
-              }}
-            >
-              {opt.label}
-            </DSText>
-          </TouchableOpacity>
-        );
-      })}
+      {options.map((opt) => (
+        <Segment
+          key={opt.value}
+          label={opt.label}
+          isActive={opt.value === value}
+          size={size}
+          fullWidth={fullWidth}
+          onPress={() => onChange(opt.value)}
+        />
+      ))}
     </View>
+  );
+}
+
+/**
+ * Un segmento. Extraído para poder usar `useHover` por ítem (los hooks no
+ * pueden vivir dentro del callback de un .map). D-20.a: el segmento INACTIVO
+ * tinta accent.subtle en hover (web); el activo no cambia (ya está resaltado).
+ */
+function Segment({
+  label,
+  isActive,
+  size,
+  fullWidth,
+  onPress,
+}: {
+  label: string;
+  isActive: boolean;
+  size: Size;
+  fullWidth: boolean;
+  onPress: () => void;
+}) {
+  const { hovered, hoverHandlers } = useHover();
+  const bg = isActive
+    ? color.bg.elevated
+    : hovered
+      ? color.accent.subtle
+      : 'transparent';
+  return (
+    <Pressable
+      onPress={onPress}
+      {...hoverHandlers}
+      style={{
+        flex: fullWidth ? 1 : undefined,
+        height: SIZE_HEIGHT[size],
+        borderRadius: radius.pill,
+        backgroundColor: bg,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: space['3'],
+      }}
+    >
+      <DSText
+        variant={size === 'sm' ? 'caption' : 'body'}
+        color={isActive ? 'primary' : 'secondary'}
+        style={{
+          fontSize: SIZE_TEXT[size],
+          fontWeight: isActive ? '600' : '500',
+        }}
+      >
+        {label}
+      </DSText>
+    </Pressable>
   );
 }

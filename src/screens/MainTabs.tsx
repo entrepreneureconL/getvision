@@ -91,7 +91,6 @@ export default function MainTabs({
     <>
       {tab === 'home' ? (
         <DashboardScreen
-          onSignOut={onSignOut}
           onOpenSettings={() => setTab('profile')}
           onOpenHistory={openHistory}
         />
@@ -120,6 +119,7 @@ export default function MainTabs({
           businessId={businessId}
           onBack={() => setTab('home')}
           onSaved={onSettingsSaved}
+          onSignOut={onSignOut}
         />
       ) : null}
     </>

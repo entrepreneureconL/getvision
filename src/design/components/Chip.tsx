@@ -22,9 +22,10 @@
  *   <Chip variant="neutral" onPress={openFilter}>Mes</Chip>
  */
 
-import { View, TouchableOpacity, type ViewStyle, type StyleProp } from 'react-native';
+import { View, Pressable, type ViewStyle, type StyleProp } from 'react-native';
 import type { ReactNode } from 'react';
 import { color, radius, space } from '../tokens';
+import { useHover } from '../useHover';
 import DSText from './Text';
 
 type Variant = 'neutral' | 'accent' | 'success' | 'danger' | 'warning' | 'info';
@@ -84,11 +85,40 @@ export default function Chip({
 
   if (onPress) {
     return (
-      <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={chipStyle}>
+      <PressableChip onPress={onPress} base={chipStyle}>
         {content}
-      </TouchableOpacity>
+      </PressableChip>
     );
   }
 
   return <View style={chipStyle}>{content}</View>;
+}
+
+/**
+ * D-20.a — Chip tappable con hover: sube a bg.elevated bajo el cursor (web),
+ * señal de que es clickeable. Native: pressed feedback, hover nunca dispara.
+ */
+function PressableChip({
+  children,
+  onPress,
+  base,
+}: {
+  children: ReactNode;
+  onPress: () => void;
+  base: StyleProp<ViewStyle>;
+}) {
+  const { hovered, hoverHandlers } = useHover();
+  return (
+    <Pressable
+      onPress={onPress}
+      {...hoverHandlers}
+      style={({ pressed }) => [
+        base,
+        hovered ? { backgroundColor: color.bg.elevated } : null,
+        pressed ? { opacity: 0.85 } : null,
+      ]}
+    >
+      {children}
+    </Pressable>
+  );
 }

@@ -462,4 +462,36 @@ export const transactionsRepo = {
     }
     return parseTransactionList(data);
   },
+
+  /**
+   * Últimos N movimientos DENTRO de un rango [start, end] (fechas 'YYYY-MM-DD').
+   *
+   * Issue 2 (2026-06-13): la sección "Últimos movimientos" del dashboard debe
+   * seguir el filtro activo del calendario/selector (un solo reloj, G-1), no los
+   * más recientes globales. Misma forma que `listRecent` — FULL_COLUMNS para que
+   * la lista muestre el chip "Pendiente" + descripción sin queries extra — pero
+   * acotada por fecha y ordenada desc (preview: los más recientes del rango).
+   */
+  async listRecentByRange(
+    businessId: string,
+    startDate: string,
+    endDate: string,
+    limit: number = 10,
+  ): Promise<Transaction[]> {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select(FULL_COLUMNS)
+      .eq('business_id', businessId)
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('[repo:transactions] listRecentByRange error:', error);
+      return [];
+    }
+    return parseTransactionList(data);
+  },
 };

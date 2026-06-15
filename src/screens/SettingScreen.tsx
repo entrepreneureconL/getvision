@@ -14,11 +14,14 @@ import { useState, useEffect } from 'react';
 import {
   StyleSheet, View, TouchableOpacity,
   ScrollView, SafeAreaView, TextInput, ActivityIndicator, Dimensions,
-  Text as RNText,
+  Image, Text as RNText,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { SECTORS, RUBROS, SUBRUBROS } from '../utils/businessProfile';
 import type { DetailLevel } from '../schemas/business';
+import { confirmDestructive } from '../utils/confirm';
 import Container from '../components/Container';
 import CategoriesEditor from '../components/CategoriesEditor';
 import {
@@ -42,9 +45,12 @@ type Props = {
   businessId: string;
   onBack: () => void;
   onSaved: () => void;
+  /** Cierre de sesión (lo ejecuta App.handleSignOut, que ya hace el signOut de
+   *  Supabase). La fila "Cerrar sesión" lo dispara tras confirmación. */
+  onSignOut: () => void;
 };
 
-export default function SettingsScreen({ businessId, onBack, onSaved }: Props) {
+export default function SettingsScreen({ businessId, onBack, onSaved, onSignOut }: Props) {
   const [name, setName]               = useState('');
   const [sector, setSector]           = useState('');
   const [rubro, setRubro]             = useState('');
@@ -57,13 +63,18 @@ export default function SettingsScreen({ businessId, onBack, onSaved }: Props) {
   const [error, setError]             = useState('');
   const [success, setSuccess]         = useState(false);
   const [activeTab, setActiveTab]     = useState<TabKey>('general');
+  // Item 3 / D-18 — avatar del negocio (logo_url). El upload va a Supabase
+  // Storage (bucket `logos`, P-009/IT); el campo y el preview funcionan sin él.
+  const [logoUrl, setLogoUrl]                 = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError]         = useState('');
 
   useEffect(() => { loadBusiness(); }, []);
 
   const loadBusiness = async () => {
     const { data } = await supabase
       .from('businesses')
-      .select('name, sector, rubro, subrubro, income_model, detail_level, threshold_hourly_rate')
+      .select('name, sector, rubro, subrubro, income_model, detail_level, threshold_hourly_rate, logo_url')
       .eq('id', businessId)
       .single();
     if (data) {
@@ -78,6 +89,7 @@ export default function SettingsScreen({ businessId, onBack, onSaved }: Props) {
           ? String(data.threshold_hourly_rate)
           : ''
       );
+      setLogoUrl(data.logo_url ?? null);
     }
     setLoading(false);
   };
@@ -124,6 +136,75 @@ export default function SettingsScreen({ businessId, onBack, onSaved }: Props) {
       setError(err.message || 'Error al guardar.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Cierre de sesión con confirmación (issue 3). Migrado desde el header del
+   * dashboard, donde salía sin preguntar. Usa `confirmDestructive` (mismo patrón
+   * que el resto de acciones destructivas — DS modal vía ConfirmProvider). El
+   * signOut real lo hace App.handleSignOut detrás de `onSignOut`.
+   */
+  const handleSignOut = () => {
+    confirmDestructive({
+      title: '¿Estás seguro que querés salir?',
+      message: 'Vas a volver a la pantalla de inicio. Tus datos quedan guardados.',
+      confirmLabel: 'Salir',
+      cancelLabel: 'Cancelar',
+      onConfirm: onSignOut,
+    });
+  };
+
+  /**
+   * Item 3 / D-18 — elegir/cambiar el avatar del negocio. Toma una imagen con
+   * expo-image-picker, la sube a Supabase Storage (bucket `logos`) y guarda la
+   * URL pública en `businesses.logo_url`. El preview es optimista (uri local).
+   * Si el bucket todavía no existe (P-009 pendiente de IT) el upload falla y se
+   * muestra un aviso sin romper la pantalla — la foto elegida queda en preview.
+   */
+  const handlePickAvatar = async () => {
+    setAvatarError('');
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      setAvatarError('Necesitamos permiso para acceder a tus fotos.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    if (result.canceled) return;
+
+    const asset = result.assets[0];
+    setLogoUrl(asset.uri); // preview optimista
+    setUploadingAvatar(true);
+    try {
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const contentType = asset.mimeType ?? 'image/jpeg';
+      const ext = contentType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
+      const path = `${businessId}/avatar_${Date.now()}.${ext}`;
+
+      const { error: upErr } = await supabase.storage
+        .from('logos')
+        .upload(path, blob, { contentType, upsert: true });
+      if (upErr) throw upErr;
+
+      const { data: pub } = supabase.storage.from('logos').getPublicUrl(path);
+      const { error: dbErr } = await supabase
+        .from('businesses')
+        .update({ logo_url: pub.publicUrl })
+        .eq('id', businessId);
+      if (dbErr) throw dbErr;
+
+      setLogoUrl(pub.publicUrl);
+      onSaved();
+    } catch {
+      setAvatarError('No se pudo guardar la foto todavía. Probá de nuevo más tarde.');
+    } finally {
+      setUploadingAvatar(false);
     }
   };
 
@@ -187,24 +268,100 @@ export default function SettingsScreen({ businessId, onBack, onSaved }: Props) {
       <ScrollView contentContainerStyle={styles.scroll}>
         <Container>
 
-          {/* ════════════════ Tab: General ════════════════ */}
+          {/* ════════════════ Tab: General — Perfil (Item 3 / D-13) ════════════════ */}
           {activeTab === 'general' && (
-            <Stack gap="3">
-              <Text variant="caption" color="tertiary" style={{ fontStyle: 'italic' }}>
-                Nombre de tu negocio tal como aparece en el dashboard.
-              </Text>
-              <Text variant="micro" color="secondary" uppercase>Nombre del negocio</Text>
-              <TextInput
-                style={styles.input}
-                value={name}
-                onChangeText={setName}
-                placeholder="Ej: Panadería El Sol"
-                placeholderTextColor={color.text.disabled}
-                maxLength={100}
-              />
-              <Text variant="micro" color="tertiary" align="right">
-                {name.length}/100
-              </Text>
+            <Stack gap="5">
+              {/* ── Identidad: avatar + nombre (D-18 logo propio, Item 3) ── */}
+              <Card variant="surface" padding="lg">
+                <Stack align="center" gap="4">
+                  <TouchableOpacity
+                    onPress={handlePickAvatar}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cambiar foto de perfil"
+                    style={styles.avatarWrap}
+                  >
+                    {logoUrl ? (
+                      <Image source={{ uri: logoUrl }} style={styles.avatarImg} />
+                    ) : (
+                      <RNText style={styles.avatarInitial}>
+                        {(name.trim()[0] ?? '?').toUpperCase()}
+                      </RNText>
+                    )}
+                    <View style={styles.avatarBadge}>
+                      {uploadingAvatar ? (
+                        <ActivityIndicator size="small" color={color.text.primary} />
+                      ) : (
+                        <Ionicons name="camera" size={16} color={color.text.primary} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                  <Button variant="ghost" size="sm" onPress={handlePickAvatar}>
+                    {logoUrl ? 'Cambiar foto' : 'Subir foto'}
+                  </Button>
+                  {avatarError.length > 0 && (
+                    <Text variant="caption" color="danger" align="center">{avatarError}</Text>
+                  )}
+                </Stack>
+              </Card>
+
+              {/* ── Nombre del negocio ── */}
+              <Stack gap="2">
+                <Text variant="micro" color="secondary" uppercase>Nombre del negocio</Text>
+                <TextInput
+                  style={styles.input}
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Ej: Panadería El Sol"
+                  placeholderTextColor={color.text.disabled}
+                  maxLength={100}
+                />
+                <Text variant="micro" color="tertiary" align="right">{name.length}/100</Text>
+                {rubro.length > 0 && (
+                  <Text variant="caption" color="tertiary" style={{ fontStyle: 'italic' }}>
+                    {rubro}{sector ? ` · ${sector}` : ''} — tu actividad se edita en la pestaña "Actividad".
+                  </Text>
+                )}
+              </Stack>
+
+              {/* ── Diseño de la App (D-25, F2+) — placeholder bloqueado / coming-soon.
+                  Reserva el espacio de UI; la funcionalidad (paleta configurable por
+                  grupos) NO se construye todavía. */}
+              <View style={styles.lockedCard}>
+                <Stack direction="row" align="center" gap="3">
+                  <Ionicons name="color-palette-outline" size={22} color={color.text.tertiary} />
+                  <Stack gap="1" style={{ flex: 1 }}>
+                    <Text variant="bodyStrong" color="secondary">Diseño de la App</Text>
+                    <Text variant="caption" color="tertiary">
+                      Vas a poder elegir los colores de tu app (ingresos, costos, fondo…).
+                    </Text>
+                  </Stack>
+                  <View style={styles.soonBadge}>
+                    <Ionicons name="lock-closed" size={11} color={color.text.tertiary} />
+                    <Text variant="micro" color="tertiary">Próximamente</Text>
+                  </View>
+                </Stack>
+              </View>
+
+              {/* ── Sesión (issue 3 — D-13 grupo "Sesión") ──
+                  "Cerrar sesión" vive acá, no en el header del dashboard, y pide
+                  confirmación antes de salir. Fila destructiva (familia danger). */}
+              <View>
+                <Text variant="micro" color="secondary" uppercase>Sesión</Text>
+                <TouchableOpacity
+                  style={styles.signOutRow}
+                  onPress={handleSignOut}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cerrar sesión"
+                >
+                  <Ionicons name="log-out-outline" size={20} color={color.danger.base} />
+                  <Text variant="body" style={{ flex: 1, color: color.danger.base }}>
+                    Cerrar sesión
+                  </Text>
+                  <Ionicons name="chevron-forward" size={18} color={color.danger.base} />
+                </TouchableOpacity>
+              </View>
             </Stack>
           )}
 
@@ -514,6 +671,53 @@ const styles = StyleSheet.create({
   modelCardActive: {
     borderColor: color.accent.base,
     backgroundColor: color.accent.subtle,
+  },
+
+  /* Sesión — fila destructiva "Cerrar sesión" (issue 3) */
+  signOutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space['3'],
+    marginTop: space['2'],
+    minHeight: 48,
+    paddingHorizontal: space['4'],
+    paddingVertical: space['3'],
+    backgroundColor: color.danger.subtle,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.danger.muted,
+  },
+
+  /* Avatar del negocio (Item 3 / D-18) */
+  avatarWrap: {
+    width: 88, height: 88, borderRadius: 44,
+    backgroundColor: color.accent.base,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarImg: { width: 88, height: 88, borderRadius: 44 },
+  avatarInitial: { color: color.text.primary, fontSize: 36, fontWeight: '700' },
+  avatarBadge: {
+    position: 'absolute', right: -2, bottom: -2,
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: color.bg.elevated,
+    borderWidth: 2, borderColor: color.bg.base,
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  /* "Diseño de la App" — placeholder bloqueado / coming-soon (D-25, F2+) */
+  lockedCard: {
+    backgroundColor: color.bg.raised,
+    borderRadius: radius.lg,
+    padding: space['4'],
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    opacity: 0.7,
+  },
+  soonBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: space['2'], paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: color.bg.elevated,
   },
 
   /* Footer */

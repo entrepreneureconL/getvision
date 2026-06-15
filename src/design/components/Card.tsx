@@ -31,12 +31,13 @@
 
 import {
   View,
-  TouchableOpacity,
+  Pressable,
   type ViewStyle,
   type StyleProp,
 } from 'react-native';
 import type { ReactNode } from 'react';
 import { color, radius, space, shadow } from '../tokens';
+import { useHover } from '../useHover';
 
 type SurfaceVariant = 'surface' | 'elevated' | 'accent';
 type Padding = 'none' | 'sm' | 'md' | 'lg' | 'xl';
@@ -95,12 +96,43 @@ export default function Card({
   ];
 
   if (onPress) {
-    return (
-      <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={cardStyle}>
-        {children}
-      </TouchableOpacity>
-    );
+    return <InteractiveCard onPress={onPress} variant={variant} base={cardStyle}>{children}</InteractiveCard>;
   }
 
   return <View style={cardStyle}>{children}</View>;
+}
+
+/**
+ * D-20.a — Card tappable con hover (web): sube de superficie (bg.elevated) y
+ * gana sombra (shadow.raised) bajo el cursor — el "se levanta al pasar el
+ * mouse" pedido por el CEO. La variante `surface` cambia su bg; las demás
+ * conservan su tinte y solo ganan sombra (no perder identidad). Native: pressed
+ * feedback (antes activeOpacity 0.85), hover nunca dispara.
+ */
+function InteractiveCard({
+  children,
+  onPress,
+  variant,
+  base,
+}: {
+  children: ReactNode;
+  onPress: () => void;
+  variant: SurfaceVariant;
+  base: StyleProp<ViewStyle>;
+}) {
+  const { hovered, hoverHandlers } = useHover();
+  return (
+    <Pressable
+      onPress={onPress}
+      {...hoverHandlers}
+      style={({ pressed }) => [
+        base,
+        hovered ? shadow.raised : null,
+        hovered && variant === 'surface' ? { backgroundColor: color.bg.elevated } : null,
+        pressed ? { opacity: 0.85 } : null,
+      ]}
+    >
+      {children}
+    </Pressable>
+  );
 }

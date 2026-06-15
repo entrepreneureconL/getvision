@@ -105,6 +105,19 @@ export function parseLocalISODate(iso: string): Date {
   return new Date(y, m - 1, d);
 }
 
+/**
+ * D-23.a — Desplaza un ancla de mes `n` meses (n negativo = atrás) y devuelve
+ * el día 1 del mes resultante en 'YYYY-MM-DD'. Usado por la navegación de mes
+ * del calendario (chevrons ‹ ›). Construido con el constructor LOCAL (no UTC)
+ * para no reintroducir LESSONS #2; el día 1 evita el overflow clásico de
+ * "31 de marzo − 1 mes" (Date normaliza al alta del mes anterior si el día no
+ * existe, por eso anclamos al 1).
+ */
+export function shiftMonthISO(anchorISO: string, n: number): string {
+  const d = parseLocalISODate(anchorISO);
+  return toLocalISODate(new Date(d.getFullYear(), d.getMonth() + n, 1));
+}
+
 // Alias local para no cambiar los usos internos del módulo.
 const toISODate = toLocalISODate;
 
