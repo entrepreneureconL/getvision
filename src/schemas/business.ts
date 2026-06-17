@@ -52,6 +52,7 @@ export const BusinessSchema = z.object({
   threshold_hourly_rate: z.coerce.number().nonnegative().nullable().optional(), // NUEVO F0-2.5
   income_breakdown_axis:  BreakdownAxisEnum.nullable().optional(),               // NUEVO F1-M.2
   expense_breakdown_axis: BreakdownAxisEnum.nullable().optional(),               // NUEVO F1-M.2
+  logo_url: z.string().nullable().optional(),                                    // NUEVO P-009/D-18 — avatar del negocio (Storage `logos`)
 });
 
 export type Business = z.infer<typeof BusinessSchema>;

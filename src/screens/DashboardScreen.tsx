@@ -19,6 +19,7 @@ import {
   StyleSheet,
   Text as RNText,
   View,
+  Image,
   TouchableOpacity,
   ScrollView,
   SafeAreaView,
@@ -1092,9 +1093,13 @@ export default function DashboardScreen({ onOpenSettings, onOpenHistory }: Props
           <Stack direction="row" align="center" justify="space-between" gap="3" style={{ marginBottom: space['4'] }}>
             <Stack direction="row" align="center" gap="3" style={{ flex: 1 }}>
               <View style={styles.avatar}>
-                <RNText style={styles.avatarText}>
-                  {businessName.charAt(0).toUpperCase()}
-                </RNText>
+                {business?.logo_url ? (
+                  <Image source={{ uri: business.logo_url }} style={styles.avatarImg} />
+                ) : (
+                  <RNText style={styles.avatarText}>
+                    {businessName.charAt(0).toUpperCase()}
+                  </RNText>
+                )}
               </View>
               <Stack gap="0" style={{ flex: 1 }}>
                 <Text variant="caption" color="tertiary">{greetingFor()}</Text>
@@ -1282,8 +1287,10 @@ const styles = StyleSheet.create({
     backgroundColor: token.accent.muted,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   avatarText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  avatarImg: { width: 44, height: 44, borderRadius: radius.md },
 
   /* Picker */
   pickerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },

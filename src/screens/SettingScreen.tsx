@@ -181,27 +181,46 @@ export default function SettingsScreen({ businessId, onBack, onSaved, onSignOut 
     setLogoUrl(asset.uri); // preview optimista
     setUploadingAvatar(true);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error('Sesión no disponible al subir la foto.');
+
       const response = await fetch(asset.uri);
       const blob = await response.blob();
       const contentType = asset.mimeType ?? 'image/jpeg';
       const ext = contentType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
-      const path = `${businessId}/avatar_${Date.now()}.${ext}`;
 
-      const { error: upErr } = await supabase.storage
-        .from('logos')
-        .upload(path, blob, { contentType, upsert: true });
-      if (upErr) throw upErr;
+      // Subida vía Edge Function `avatar-upload` (no directo a Storage).
+      // Por qué: este proyecto migró a JWT Signing Keys (tokens con `kid`) y el
+      // servicio de Storage NO los valida — trata el upload como `anon` y la RLS
+      // lo rechaza, aunque PostgREST sí valida el mismo token (verificado en
+      // P-009). La Edge Function identifica al usuario con auth.getUser() (GoTrue
+      // valida sus propios tokens) y sube con service_role, que saltea la RLS de
+      // Storage. La función también escribe businesses.logo_url y nos devuelve la
+      // URL pública.
+      const uploadRes = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/avatar-upload`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string,
+            'Content-Type': contentType,
+            'x-business-id': businessId,
+            'x-file-ext': ext,
+          },
+          body: blob,
+        },
+      );
+      if (!uploadRes.ok) {
+        throw new Error(`avatar-upload ${uploadRes.status}: ${await uploadRes.text()}`);
+      }
+      const { publicUrl } = await uploadRes.json();
 
-      const { data: pub } = supabase.storage.from('logos').getPublicUrl(path);
-      const { error: dbErr } = await supabase
-        .from('businesses')
-        .update({ logo_url: pub.publicUrl })
-        .eq('id', businessId);
-      if (dbErr) throw dbErr;
-
-      setLogoUrl(pub.publicUrl);
+      setLogoUrl(publicUrl);
       onSaved();
-    } catch {
+    } catch (e) {
+      console.error('[avatar] upload/save failed:', e);
       setAvatarError('No se pudo guardar la foto todavía. Probá de nuevo más tarde.');
     } finally {
       setUploadingAvatar(false);

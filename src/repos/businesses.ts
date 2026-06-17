@@ -23,7 +23,7 @@ import { accountsRepo } from './accounts';
 const COLUMNS =
   'id, name, sector, rubro, subrubro, income_model, onboarding_completed, ' +
   'detail_level, operator_role, threshold_hourly_rate, ' +
-  'income_breakdown_axis, expense_breakdown_axis';
+  'income_breakdown_axis, expense_breakdown_axis, logo_url';
 
 export const businessesRepo = {
   /**
