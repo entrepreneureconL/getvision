@@ -106,6 +106,15 @@ export default function ModalShell({
   const anim = animationType ?? (placement === 'sheet' ? 'slide' : 'fade');
   const rootStyle = placement === 'sheet' ? styles.sheetRoot : styles.centerRoot;
 
+  // P-021: en 'sheet', el panel se limita a maxWidth 640 y se centra. Sin esto,
+  // en escritorio el sheet ocupa TODO el ancho (flex-end + stretch) y el único
+  // backdrop clickeable es una franja fina arriba — el usuario hace clic "al
+  // costado" y en realidad toca el panel (no cierra). Con el cap, quedan bandas
+  // de backdrop a izquierda/derecha que sí cierran. En móvil (<640) es 100%,
+  // igual que antes.
+  const panelWrap =
+    placement === 'sheet' ? <View style={styles.sheetPanelWrap}>{children}</View> : children;
+
   const inner = (
     <>
       {/* Backdrop oscuro DETRÁS del panel — clic afuera cierra. */}
@@ -113,7 +122,7 @@ export default function ModalShell({
         style={[StyleSheet.absoluteFill, { backgroundColor: color.bg.overlay }]}
         onPress={requestClose}
       />
-      {children}
+      {panelWrap}
     </>
   );
 
@@ -137,6 +146,11 @@ const styles = StyleSheet.create({
   sheetRoot: {
     flex: 1,
     justifyContent: 'flex-end',
+  },
+  sheetPanelWrap: {
+    width: '100%',
+    maxWidth: 640,
+    alignSelf: 'center',
   },
   centerRoot: {
     flex: 1,
