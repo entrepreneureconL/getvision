@@ -12,7 +12,7 @@
 
 import { useState, useEffect } from 'react';
 import {
-  StyleSheet, View, TouchableOpacity,
+  StyleSheet, View, TouchableOpacity, Linking,
   ScrollView, SafeAreaView, TextInput, ActivityIndicator, Dimensions,
   Image, Text as RNText,
 } from 'react-native';
@@ -38,6 +38,24 @@ import {
 } from '../design';
 
 const { width } = Dimensions.get('window');
+
+// F1-Soporte — canal humano de ayuda. COMPLETAR el número real de WhatsApp en
+// formato internacional SIN '+' ni espacios (Argentina móvil: 549 + área + número,
+// ej. 5491122334455). El email ya apunta a la casilla del negocio.
+const SUPPORT_WHATSAPP = ''; // TODO CEO: número real (549 + área + nº, sin '+'). Vacío = botón oculto.
+const SUPPORT_EMAIL = 'entrepreneurecon@gmail.com';
+// Mientras no haya número cargado, mostramos solo el email (F1-Soporte ya es
+// desplegable sin WhatsApp). Al setear SUPPORT_WHATSAPP, el botón aparece solo.
+const SUPPORT_WHATSAPP_READY = SUPPORT_WHATSAPP.length > 0;
+
+function openWhatsApp() {
+  const msg = encodeURIComponent('Hola GetVision 👋 Necesito ayuda con la app.');
+  Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP}?text=${msg}`).catch(() => {});
+}
+function openSupportEmail() {
+  const subject = encodeURIComponent('Soporte GetVision');
+  Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}`).catch(() => {});
+}
 
 type TabKey = 'general' | 'actividad' | 'preferencias' | 'categorias';
 
@@ -534,6 +552,22 @@ export default function SettingsScreen({ businessId, onBack, onSaved, onSignOut 
                     </Stack>
                   </TouchableOpacity>
                 ))}
+              </Stack>
+
+              {/* F1-Soporte — canal humano de ayuda (WhatsApp + email) */}
+              <Stack gap="2" style={{ marginTop: space['4'] }}>
+                <Text variant="micro" color="secondary" uppercase>Ayuda y soporte</Text>
+                <Text variant="caption" color="tertiary" style={{ fontStyle: 'italic' }}>
+                  ¿Dudas o algo no funciona? Escribinos — te responde una persona, no un bot.
+                </Text>
+                {SUPPORT_WHATSAPP_READY && (
+                  <Button variant="secondary" size="md" fullWidth onPress={openWhatsApp}>
+                    💬  Hablanos por WhatsApp
+                  </Button>
+                )}
+                <Button variant={SUPPORT_WHATSAPP_READY ? 'ghost' : 'secondary'} size="md" fullWidth onPress={openSupportEmail}>
+                  ✉️  Escribinos por email
+                </Button>
               </Stack>
             </Stack>
           )}
