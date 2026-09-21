@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Política de Privacidad — GetVision</title>
+  <meta name="description" content="Política de privacidad de GetVision: qué datos tratamos, con qué fin y tus derechos." />
+  <style>
+    :root{ --bg:#0F0F1A; --raised:#12122A; --border:#242446; --text:#EDEDF5; --muted:#A0A0B8; --accent:#1F8579; }
+    *{ box-sizing:border-box; }
+    body{ margin:0; background:var(--bg); color:var(--text);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      line-height:1.6; }
+    .wrap{ max-width:720px; margin:0 auto; padding:32px 20px 80px; }
+    h1{ font-size:1.7rem; margin:0 0 4px; }
+    h2{ font-size:1.15rem; margin:32px 0 8px; color:#fff; }
+    a{ color:var(--accent); }
+    .meta{ color:var(--muted); font-size:.9rem; border-bottom:1px solid var(--border); padding-bottom:16px; margin-bottom:8px; }
+    .meta b{ color:var(--text); }
+    .card{ background:var(--raised); border:1px solid var(--border); border-radius:14px; padding:16px 18px; margin-top:12px; }
+    ul{ padding-left:20px; }
+    li{ margin:4px 0; }
+    .accent{ color:var(--accent); font-weight:600; }
+    footer{ margin-top:40px; color:var(--muted); font-size:.85rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Política de Privacidad — GetVision</h1>
+    <p class="meta">
+      <b>Última actualización:</b> 21 de septiembre de 2026 &nbsp;·&nbsp;
+      <b>Responsable:</b> GetVision (Argentina) &nbsp;·&nbsp;
+      <b>Contacto:</b> <a href="mailto:entrepreneurecon@gmail.com">entrepreneurecon@gmail.com</a>
+    </p>
+
+    <h2>1. Quiénes somos</h2>
+    <p>GetVision es una aplicación de gestión financiera para emprendedores, monotributistas y PyMEs. Te ayuda a registrar movimientos (ingresos, gastos, pedidos), ver el estado de tu dinero y entender la salud de tu negocio. Esta política explica qué datos tratamos, con qué fin y qué derechos tenés.</p>
+
+    <h2>2. Qué datos recopilamos</h2>
+    <div class="card">
+      <p><span class="accent">a) De tu cuenta:</span> correo electrónico y credenciales de acceso (la contraseña se almacena de forma segura mediante nuestro proveedor de autenticación; nunca la vemos en texto plano).</p>
+      <p><span class="accent">b) Que vos cargás (tu negocio):</span> nombre del negocio, rubro, sector, imagen/logo (opcional); movimientos financieros (importes, fechas, categorías, cuentas, métodos de pago, descripciones, estado cobrado/pendiente); pedidos y, de forma <b>opcional</b>, datos de clientes (nombre y, si los agregás, contacto/notas).</p>
+      <p><span class="accent">c) De calendario (solo si conectás Google Calendar):</span> creamos/actualizamos/borramos <b>únicamente los eventos generados por la app</b> a partir de tus pedidos. Ver §6.</p>
+      <p><span class="accent">d) Técnicos y de uso:</span> eventos de uso anónimos para mejorar el producto. <b>No incluyen importes ni datos personales identificables.</b></p>
+      <p><b>No recopilamos datos bancarios ni conectamos tus cuentas de banco.</b> Todo movimiento lo cargás vos.</p>
+    </div>
+
+    <h2>3. Para qué usamos tus datos</h2>
+    <ul>
+      <li>Prestar el servicio: guardar y mostrar tus movimientos, calcular métricas y balances.</li>
+      <li>Mostrar contexto macroeconómico de fuentes públicas (ej. INDEC/BCRA) — no requiere datos tuyos.</li>
+      <li>(Si lo activás) sincronizar pedidos con tu Google Calendar.</li>
+      <li>Mejorar la app mediante telemetría agregada y anónima; comunicarnos con vos por soporte o cambios del servicio.</li>
+    </ul>
+
+    <h2>4. Base legal y consentimiento</h2>
+    <p>Tratamos tus datos para (a) ejecutar el servicio que solicitás, (b) cumplir obligaciones legales aplicables y (c) nuestro interés legítimo en mejorar el producto. Las integraciones opcionales (como Google Calendar) requieren tu <b>consentimiento explícito</b> y podés revocarlas cuando quieras.</p>
+
+    <h2>5. Dónde se guardan y con quién los compartimos</h2>
+    <ul>
+      <li><b>Supabase</b> — base de datos, autenticación y almacenamiento (protegido por seguridad a nivel de fila: cada usuario accede solo a lo suyo).</li>
+      <li><b>Vercel</b> — hosting de la aplicación web.</li>
+      <li><b>Google</b> — solo si conectás Google Calendar (ver §6).</li>
+      <li><b>Procesador de pagos</b> (cuando exista suscripción paga) — para procesar el pago; no almacenamos los datos completos de tu tarjeta.</li>
+    </ul>
+    <p><b>No vendemos tus datos</b> ni los compartimos con terceros para publicidad.</p>
+
+    <h2>6. Uso limitado de datos de Google</h2>
+    <p>El uso de la información recibida de las APIs de Google se ajusta a la
+      <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>,
+      incluidos los requisitos de <b>Uso Limitado (Limited Use)</b>. En concreto:</p>
+    <ul>
+      <li>Solo accedemos al scope <code>calendar.events</code> para crear/editar/borrar <b>eventos generados por GetVision</b> a partir de tus pedidos.</li>
+      <li><b>No</b> usamos esos datos para publicidad, <b>no</b> los vendemos y <b>no</b> los transferimos salvo para prestar el servicio, por obligación legal o con tu consentimiento.</li>
+      <li>No usamos los datos de Google para entrenar modelos de IA.</li>
+      <li>Los tokens se guardan cifrados del lado del servidor; podés desconectar la integración en cualquier momento desde Ajustes.</li>
+    </ul>
+
+    <h2>7. Retención</h2>
+    <p>Conservamos tus datos mientras tu cuenta esté activa. Si eliminás tu cuenta o lo solicitás, borramos tus datos personales en un plazo razonable, salvo lo que debamos conservar por obligación legal.</p>
+
+    <h2>8. Tus derechos</h2>
+    <p>Tenés derecho a <b>acceder, rectificar, exportar y eliminar</b> tus datos. La app permite exportar tus movimientos y podés solicitar la baja escribiendo a <a href="mailto:entrepreneurecon@gmail.com">entrepreneurecon@gmail.com</a>. En Argentina, la autoridad de control es la Agencia de Acceso a la Información Pública (Ley 25.326).</p>
+
+    <h2>9. Seguridad</h2>
+    <p>Aplicamos seguridad a nivel de fila (RLS) en todas las tablas, cifrado en tránsito y acceso con OAuth/PKCE. Ninguna medida es infalible; ante un incidente que te afecte, te notificaremos según la normativa aplicable.</p>
+
+    <h2>10. Menores</h2>
+    <p>GetVision no está dirigida a menores de 18 años y no recopilamos datos de menores de forma consciente.</p>
+
+    <h2>11. Cambios en esta política</h2>
+    <p>Podemos actualizar esta política; publicaremos la fecha de la última actualización arriba y, si el cambio es material, te avisaremos.</p>
+
+    <h2>12. Contacto</h2>
+    <p>Dudas o solicitudes sobre privacidad: <a href="mailto:entrepreneurecon@gmail.com">entrepreneurecon@gmail.com</a>.</p>
+
+    <footer>GetVision · Política de privacidad · Argentina</footer>
+  </div>
+</body>
+</html>
