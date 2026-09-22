@@ -20,7 +20,7 @@
  * en lugar de type='income/expense' + category libre.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, Dimensions
@@ -31,10 +31,9 @@ import { accountsRepo } from '../repos/accounts';
 import { eventsRepo } from '../repos/events';
 import { resolveCategory } from '../utils/transactionCategories';
 import { todayLocalISO } from '../utils/periods';
-import { requestDiscardOrClose } from '../utils/confirm';
 import type { Account } from '../schemas/account';
 import type { Transaction } from '../schemas/transaction';
-import { ModalShell } from '../design';
+import { ModalShell, type ModalShellHandle } from '../design';
 
 const { width } = Dimensions.get('window');
 const FORM_WIDTH = Math.min(400, width - 48);
@@ -83,9 +82,9 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
     else onClose();
   };
 
-  // P-022: el × pasa por la misma puerta dirty que el backdrop (confirma si hay
-  // cambios sin guardar; si no, cierra vía handleClose).
-  const requestClose = () => requestDiscardOrClose({ dirty, onClose: handleClose });
+  // P-022: el × dispara el flujo dirty de ModalShell (confirm in-Modal) vía ref;
+  // "Descartar" ejecuta el onClose del shell = handleClose.
+  const shellRef = useRef<ModalShellHandle>(null);
 
   useEffect(() => {
     let active = true;
@@ -229,12 +228,12 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
   };
 
   return (
-    <ModalShell visible onClose={handleClose} dirty={dirty}>
+    <ModalShell ref={shellRef} visible onClose={handleClose} dirty={dirty}>
       <View style={styles.panel}>
 
         <View style={styles.panelHeader}>
           <Text style={styles.panelTitle}>↔️ Movimientos</Text>
-          <TouchableOpacity onPress={requestClose}>
+          <TouchableOpacity onPress={() => shellRef.current?.requestClose()}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
         </View>

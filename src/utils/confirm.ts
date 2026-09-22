@@ -82,40 +82,6 @@ export function confirmDestructive(opts: ConfirmOptions): void {
 }
 
 /**
- * requestDiscardOrClose — puerta única de "cierre con protección dirty".
- *
- * Si el form tiene cambios sin guardar (`dirty`), pide confirmación
- * ("¿Descartar los cambios?" → Seguir editando / Descartar) ANTES de cerrar.
- * Si está limpio, cierra directo. Lo usan TANTO `ModalShell` (backdrop/Esc/back)
- * COMO el botón × del header de cada form, para que todas las rutas de cierre se
- * comporten idéntico (P-022: antes el × cerraba directo y salteaba el confirm).
- */
-export function requestDiscardOrClose(args: {
-  dirty: boolean;
-  onClose: () => void;
-  title?: string;
-  message?: string;
-}): void {
-  const {
-    dirty,
-    onClose,
-    title = '¿Descartar los cambios?',
-    message = 'Si salís ahora se pierde lo que cargaste.',
-  } = args;
-  if (!dirty) {
-    onClose();
-    return;
-  }
-  confirmDestructive({
-    title,
-    message,
-    confirmLabel: 'Descartar',
-    cancelLabel: 'Seguir editando',
-    onConfirm: onClose,
-  });
-}
-
-/**
  * Alerta informativa de una sola vía (sin confirmación). Útil para errores
  * que el usuario debe ver pero no necesitan ack distinto a "OK".
  *

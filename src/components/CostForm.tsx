@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, Dimensions
 } from 'react-native';
-import { confirmDestructive, requestDiscardOrClose } from '../utils/confirm';
+import { confirmDestructive } from '../utils/confirm';
 import { supabase } from '../lib/supabase';
 import {
   getCategoriesForType,
@@ -19,7 +19,7 @@ import AddCategoryModal from './AddCategoryModal';
 import type { Transaction } from '../schemas/transaction';
 import type { Account } from '../schemas/account';
 import type { CategoryOverride } from '../schemas/categoryOverride';
-import { ModalShell } from '../design';
+import { ModalShell, type ModalShellHandle } from '../design';
 
 const { width } = Dimensions.get('window');
 const FORM_WIDTH = Math.min(400, width - 48);
@@ -188,13 +188,16 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction, 
     });
   };
 
+  // P-022: el × dispara el flujo dirty de ModalShell (confirm in-Modal) vía ref.
+  const shellRef = useRef<ModalShellHandle>(null);
+
   return (
     <>
-    <ModalShell visible onClose={onClose} dirty={dirty}>
+    <ModalShell ref={shellRef} visible onClose={onClose} dirty={dirty}>
       <View style={styles.panel}>
         <View style={styles.panelHeader}>
           <Text style={styles.panelTitle}>{isEdit ? 'Editar costo' : 'Nuevo costo'}</Text>
-          <TouchableOpacity onPress={() => requestDiscardOrClose({ dirty, onClose })}>
+          <TouchableOpacity onPress={() => shellRef.current?.requestClose()}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
         </View>

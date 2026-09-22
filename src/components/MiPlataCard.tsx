@@ -20,7 +20,7 @@
  * pendientes" SOLO aparecen en chip 'today' — para los otros chips son
  * proyecciones STOCK futuras que no encajan con FLOW histórico.
  *
- * `currentLiquidNow` viaja como caption al pie ("Saldo total: $X") para que
+ * `currentLiquidNow` viaja como caption al pie ("Plata en cuentas: $X") para que
  * el usuario no pierda de vista cuánto tiene en total — info de referencia.
  *
  * Props de extensión:
@@ -277,7 +277,7 @@ export default function MiPlataCard({
       {/* ── Sub-info de referencia: saldo TOTAL ahora (stock) ── */}
       <Divider variant="subtle" spacing="3" />
       <Text variant="caption" color="tertiary" align="center">
-        Saldo total ahora · $ {formatMoney(currentLiquidNow)}
+        Plata en cuentas · $ {formatMoney(currentLiquidNow)}
       </Text>
     </Card>
   );

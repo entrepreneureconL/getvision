@@ -15,16 +15,16 @@
  * MASTER — el rewrite al DS de los forms grandes es un bloque aparte.
  */
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator,
 } from 'react-native';
-import { confirmDestructive, requestDiscardOrClose } from '../utils/confirm';
+import { confirmDestructive } from '../utils/confirm';
 import { todayLocalISO } from '../utils/periods';
 import { ordersRepo } from '../repos/orders';
 import type { Order } from '../schemas/order';
-import { ModalShell } from '../design';
+import { ModalShell, type ModalShellHandle } from '../design';
 
 type Props = {
   businessId: string;
@@ -115,13 +115,16 @@ export default function OrderForm({
     });
   };
 
+  // P-022: el × dispara el flujo dirty de ModalShell (confirm in-Modal) vía ref.
+  const shellRef = useRef<ModalShellHandle>(null);
+
   return (
-    <ModalShell visible onClose={onClose} dirty={dirty}>
+    <ModalShell ref={shellRef} visible onClose={onClose} dirty={dirty}>
       <View style={styles.panel}>
 
         <View style={styles.panelHeader}>
           <Text style={styles.panelTitle}>{isEdit ? 'Editar pedido' : 'Nuevo pedido'}</Text>
-          <TouchableOpacity onPress={() => requestDiscardOrClose({ dirty, onClose })} style={styles.closeBtn}>
+          <TouchableOpacity onPress={() => shellRef.current?.requestClose()} style={styles.closeBtn}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
         </View>

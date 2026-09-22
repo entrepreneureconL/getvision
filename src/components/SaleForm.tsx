@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, Dimensions
 } from 'react-native';
-import { confirmDestructive, requestDiscardOrClose } from '../utils/confirm';
+import { confirmDestructive } from '../utils/confirm';
 import { supabase } from '../lib/supabase';
 import {
   getCategoriesForType,
@@ -20,7 +20,7 @@ import type { Transaction } from '../schemas/transaction';
 import type { Account } from '../schemas/account';
 import type { CategoryOverride } from '../schemas/categoryOverride';
 
-import { color as token, ModalShell } from '../design';
+import { color as token, ModalShell, type ModalShellHandle } from '../design';
 
 const { width } = Dimensions.get('window');
 // D-8: el acento legacy azul #2E86C1 quedó huérfano acá tras ADR #11 — ahora
@@ -204,18 +204,18 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction, 
     });
   };
 
-  // P-022: el × usa la MISMA puerta dirty que el backdrop de ModalShell. Antes
-  // cerraba directo y salteaba el "¿Descartar?" → ahora ambas rutas confirman.
-  const requestClose = () => requestDiscardOrClose({ dirty, onClose });
+  // P-022: el × dispara el MISMO flujo dirty que el backdrop, vía el handle de
+  // ModalShell (confirm in-Modal). Antes cerraba directo y salteaba el confirm.
+  const shellRef = useRef<ModalShellHandle>(null);
 
   return (
     <>
-    <ModalShell visible onClose={onClose} dirty={dirty}>
+    <ModalShell ref={shellRef} visible onClose={onClose} dirty={dirty}>
       <View style={styles.panel}>
 
         <View style={styles.panelHeader}>
           <Text style={styles.panelTitle}>{isEdit ? 'Editar venta' : 'Nueva venta'}</Text>
-          <TouchableOpacity onPress={requestClose} style={styles.closeBtn}>
+          <TouchableOpacity onPress={() => shellRef.current?.requestClose()} style={styles.closeBtn}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
         </View>

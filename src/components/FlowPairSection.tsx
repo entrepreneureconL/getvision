@@ -208,7 +208,12 @@ function FlowTile({ kind, block, period, prevLabel, tone, selected, onPress }: T
       : (isUp ? color.danger.base : color.success.base);
   const arrow = isUp ? '↑' : '↓';
 
-  const totalColor = tone === 'danger' ? color.danger.base : color.text.primary;
+  // A (CEO 22-09): ingresos positivos en verde → matchea la línea verde del
+  // gráfico y refuerza verde=positivo / rojo=negativo. Costos siguen su tono
+  // (rojo solo si el balance del período < 0; si no, neutro — §5.4.3).
+  let totalColor: string = color.text.primary;
+  if (tone === 'danger') totalColor = color.danger.base;
+  else if (kind === 'income' && total > 0) totalColor = color.success.base;
 
   const totalStyle = {
     fontSize: tokenText.size['2xl'],

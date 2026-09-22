@@ -28,7 +28,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Platform, StyleSheet, View } from 'react-native';
+import { Modal, StyleSheet, View } from 'react-native';
 import {
   Card, Heading, Text, Stack, Button, color, space, radius,
 } from '../design';
@@ -64,55 +64,46 @@ export default function ConfirmProvider({ children }: { children: React.ReactNod
     else if (onCancel) onCancel();
   };
 
-  // Contenido del diálogo (idéntico en web y native).
-  const dialog = pending && (
-    <Card variant="elevated" padding="xl" rounded="xl" style={styles.card}>
-      <Stack gap="4">
-        <Heading level={3} color="primary">{pending.title}</Heading>
-        <Text variant="body" color="secondary">{pending.message}</Text>
-        <Stack direction="row" gap="3" style={{ marginTop: space['2'] }}>
-          <View style={{ flex: 1 }}>
-            <Button variant="ghost" size="md" fullWidth onPress={() => close('cancel')}>
-              {pending.cancelLabel ?? 'Cancelar'}
-            </Button>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Button variant="danger" size="md" fullWidth onPress={() => close('confirm')}>
-              {pending.confirmLabel ?? 'Eliminar'}
-            </Button>
-          </View>
-        </Stack>
-      </Stack>
-    </Card>
-  );
-
   return (
     <>
       {children}
 
       {/*
-        P-022: en WEB NO usamos un segundo <Modal> de RN. Cuando este confirm se
-        dispara desde el backdrop de un form que YA tiene un <Modal> abierto,
-        react-native-web queda con dos Modals apilados → el confirm no recibe
-        eventos / la pantalla se congela. En su lugar montamos un overlay fixed
-        de nivel superior (position:'fixed' + zIndex alto) que pinta SOBRE el
-        Modal del form y sí es interactivo. En native seguimos con <Modal>
-        (el anidamiento nativo funciona bien y respeta el back de Android).
+        Modal de RN: backdrop dimmed + content centered. transparent=true para
+        que el backdrop se vea. NOTA (P-022): el confirm de DESCARTE de los forms
+        NO pasa por acá — lo maneja <ModalShell/> dentro de su propio Modal para
+        no apilar dos Modals RN-web. Este Provider queda para confirms sueltos
+        (ej. "¿Eliminar esta venta?") disparados fuera de un ModalShell abierto.
        */}
-      {Platform.OS === 'web' ? (
-        pending != null ? (
-          <View style={[styles.backdrop, styles.webFixed]}>{dialog}</View>
-        ) : null
-      ) : (
-        <Modal
-          visible={pending != null}
-          transparent
-          animationType="fade"
-          onRequestClose={() => close('cancel')}
-        >
-          <View style={styles.backdrop}>{dialog}</View>
-        </Modal>
-      )}
+      <Modal
+        visible={pending != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => close('cancel')}
+      >
+        <View style={styles.backdrop}>
+          <Card variant="elevated" padding="xl" rounded="xl" style={styles.card}>
+            {pending && (
+              <Stack gap="4">
+                <Heading level={3} color="primary">{pending.title}</Heading>
+                <Text variant="body" color="secondary">{pending.message}</Text>
+                <Stack direction="row" gap="3" style={{ marginTop: space['2'] }}>
+                  <View style={{ flex: 1 }}>
+                    <Button variant="ghost" size="md" fullWidth onPress={() => close('cancel')}>
+                      {pending.cancelLabel ?? 'Cancelar'}
+                    </Button>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Button variant="danger" size="md" fullWidth onPress={() => close('confirm')}>
+                      {pending.confirmLabel ?? 'Eliminar'}
+                    </Button>
+                  </View>
+                </Stack>
+              </Stack>
+            )}
+          </Card>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -124,18 +115,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: space['5'],
-  },
-  // Web only: overlay fixed que cubre el viewport por encima de cualquier Modal
-  // de form (P-022). `position:'fixed'` es válido en react-native-web aunque el
-  // typing de RN no lo incluya → cast. `flex:1` no aplica sin padre flex, por
-  // eso fijamos las 4 esquinas.
-  webFixed: {
-    position: 'fixed' as any,
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 9999,
   },
   card: {
     width: '100%',
