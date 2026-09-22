@@ -3,7 +3,7 @@ import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, Dimensions
 } from 'react-native';
-import { confirmDestructive } from '../utils/confirm';
+import { confirmDestructive, requestDiscardOrClose } from '../utils/confirm';
 import { supabase } from '../lib/supabase';
 import {
   getCategoriesForType,
@@ -194,12 +194,12 @@ export default function CostForm({ businessId, onSuccess, onClose, transaction, 
       <View style={styles.panel}>
         <View style={styles.panelHeader}>
           <Text style={styles.panelTitle}>{isEdit ? 'Editar costo' : 'Nuevo costo'}</Text>
-          <TouchableOpacity onPress={onClose}>
+          <TouchableOpacity onPress={() => requestDiscardOrClose({ dirty, onClose })}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={true}>
 
           <Text style={styles.label}>Monto del costo *</Text>
           <View style={styles.amountRow}>

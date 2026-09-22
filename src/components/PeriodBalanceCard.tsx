@@ -20,12 +20,15 @@
 
 import { View } from 'react-native';
 import type { Period } from '../utils/periods';
+import { bucketByWeek, ddMM } from '../utils/periods';
 import type { FlowSeriesPoint } from '../repos/analytics';
 import Money, { formatMoney } from './Money';
 import {
   Text,
   Card,
   PeriodBars,
+  PeriodLines,
+  type PeriodLinePoint,
   color,
   space,
   text as tokenText,
@@ -44,6 +47,8 @@ type Props = {
   prevExpense?: number;
   /** Label del período anterior ("ayer", "semana pasada", "Mayo 2026"). */
   prevLabel?: string;
+  /** P-018 — 'lines' (default, Inicio) o 'bars' (Stats mantiene lo anterior). */
+  chart?: 'lines' | 'bars';
 };
 
 const PERIOD_LABEL: Record<Period, string> = {
@@ -51,6 +56,15 @@ const PERIOD_LABEL: Record<Period, string> = {
   week:  'Balance de la semana',
   month: 'Balance del mes',
   year:  'Balance del año',
+};
+
+/** Leyenda de 1 línea compartida por ambos gráficos (líneas y barras). */
+const styles_legendRow = {
+  flexDirection: 'row' as const,
+  justifyContent: 'center' as const,
+  alignItems: 'center' as const,
+  gap: space['2'],
+  marginTop: space['3'],
 };
 
 export default function PeriodBalanceCard({
@@ -61,6 +75,7 @@ export default function PeriodBalanceCard({
   prevIncome,
   prevExpense,
   prevLabel,
+  chart = 'lines',
 }: Props) {
   const balance = income - expense;
 
@@ -98,6 +113,26 @@ export default function PeriodBalanceCard({
     emphasized: p.isToday,
   }));
 
+  // P-018 — puntos para el gráfico de líneas. Mes → buckets semanales (CEO: no
+  // días); resto → serie diaria con label DD/MM. Con < 2 puntos, <PeriodLines/>
+  // muestra una serie demo (usuarios nuevos nunca ven vacío).
+  const linePoints: PeriodLinePoint[] = period === 'month'
+    ? bucketByWeek(
+        (series ?? []).map(p => ({
+          date: p.date, up: p.income, down: p.expense, isToday: p.isToday,
+        })),
+      )
+    : (series ?? []).map(p => ({
+        key: p.date, label: ddMM(p.date), up: p.income, down: p.expense,
+        emphasized: p.isToday,
+      }));
+
+  const hasLineData = linePoints.length >= 2;
+  const avgUp = hasLineData ? linePoints.reduce((s, p) => s + p.up, 0) / linePoints.length : 0;
+  const avgDown = hasLineData ? linePoints.reduce((s, p) => s + p.down, 0) / linePoints.length : 0;
+  // CEO: el promedio NO va como línea en el gráfico, va como mensaje aparte.
+  const avgWord = period === 'month' ? 'semana' : period === 'year' ? 'mes' : 'día';
+
   return (
     <Card variant="surface" padding="lg">
       <Text variant="micro" color="secondary" uppercase>
@@ -121,8 +156,32 @@ export default function PeriodBalanceCard({
         </Text>
       ) : null}
 
-      {/* ── Gráfico del período (D-2) — null solo si < 2 puntos ── */}
-      {barPoints.length >= 2 ? (
+      {/* ── Gráfico del período ── */}
+      {chart === 'lines' ? (
+        // P-018 líneas (Inicio). Siempre se renderiza: con < 2 puntos muestra demo.
+        <>
+          <View style={{ marginTop: space['4'] }}>
+            <PeriodLines points={linePoints} formatMoney={formatMoney} />
+          </View>
+
+          <View style={styles_legendRow}>
+            <LegendDot tint={color.success.base} />
+            <Text variant="micro" color="tertiary">Ingresos</Text>
+            <LegendDot tint={color.danger.base} />
+            <Text variant="micro" color="tertiary">Costos</Text>
+          </View>
+
+          {/* Promedio como mensaje (no como línea del gráfico) — CEO P-018. */}
+          {hasLineData && avgUp > 0 ? (
+            <View style={{ alignItems: 'center', marginTop: space['1'] }}>
+              <Text variant="micro" color="tertiary">
+                Promedio por {avgWord}: ↑ $ {formatMoney(avgUp)} · ↓ $ {formatMoney(avgDown)}
+              </Text>
+            </View>
+          ) : null}
+        </>
+      ) : barPoints.length >= 2 ? (
+        // Barras (Stats mantiene el comportamiento anterior).
         <>
           <View style={{ marginTop: space['4'] }}>
             <PeriodBars
@@ -133,15 +192,7 @@ export default function PeriodBalanceCard({
           </View>
 
           {/* Leyenda mínima — 1 línea, sin competir con el dato. */}
-          <View
-            style={{
-              flexDirection: 'row',
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: space['2'],
-              marginTop: space['3'],
-            }}
-          >
+          <View style={styles_legendRow}>
             <LegendDot tint={color.success.base} />
             <Text variant="micro" color="tertiary">Ingresos</Text>
             <LegendDot tint={color.danger.base} />

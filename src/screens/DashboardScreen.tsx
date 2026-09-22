@@ -23,7 +23,6 @@ import {
   TouchableOpacity,
   ScrollView,
   SafeAreaView,
-  Modal,
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -956,13 +955,12 @@ export default function DashboardScreen({ onOpenSettings, onOpenHistory }: Props
   // ───── Action picker (igual que F0) ─────
 
   const renderActionPicker = () => (
-    <Modal
+    <ModalShell
       visible={activeModal === 'picker'}
-      animationType="slide"
-      transparent
-      onRequestClose={() => { setActiveModal(null); setShowMoreOptions(false); }}
+      placement="sheet"
+      dirty={false}
+      onClose={() => { setActiveModal(null); setShowMoreOptions(false); }}
     >
-      <View style={styles.pickerBackdrop}>
         <View style={styles.pickerSheet}>
           <View style={styles.handle} />
           <RNText style={styles.pickerTitle}>¿Qué querés registrar?</RNText>
@@ -1080,8 +1078,7 @@ export default function DashboardScreen({ onOpenSettings, onOpenHistory }: Props
             <RNText style={styles.pickerCancelText}>Cancelar</RNText>
           </TouchableOpacity>
         </View>
-      </View>
-    </Modal>
+    </ModalShell>
   );
 
   return (
@@ -1293,7 +1290,6 @@ const styles = StyleSheet.create({
   avatarImg: { width: 44, height: 44, borderRadius: radius.md },
 
   /* Picker */
-  pickerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   pickerSheet: {
     backgroundColor: token.bg.base,
     borderTopLeftRadius: 24,

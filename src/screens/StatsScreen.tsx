@@ -99,6 +99,7 @@ export default function StatsScreen({ business, onOpenHistory }: Props) {
         prevIncome={flow.income.previousTotal}
         prevExpense={flow.expense.previousTotal}
         prevLabel={flow.prevLabel}
+        chart="bars"
       />
     ) : null;
 

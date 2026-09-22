@@ -363,3 +363,64 @@ export function getStockPeriodRange(
     }
   }
 }
+
+// ────────────────────────────────────────────────────────────────────
+// P-018 — bucketing para el gráfico de líneas de Inicio
+// ────────────────────────────────────────────────────────────────────
+
+/** 'YYYY-MM-DD' → 'DD/MM' (label corto del eje X, ej. "31/08"). */
+export function ddMM(iso: string): string {
+  const d = parseLocalISODate(iso);
+  const day = String(d.getDate()).padStart(2, '0');
+  const mon = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}/${mon}`;
+}
+
+/** Punto diario de entrada al bucketing (subset de FlowSeriesPoint). */
+export type DailyFlowPoint = {
+  date: string;   // 'YYYY-MM-DD'
+  up: number;     // ingresos del día
+  down: number;   // costos del día
+  isToday?: boolean;
+};
+
+/** Bucket semanal listo para <PeriodLines/> (label = lunes de la semana). */
+export type WeeklyFlowBucket = {
+  key: string;
+  label: string;
+  up: number;
+  down: number;
+  emphasized: boolean;
+};
+
+/** Lunes (inicio de semana ISO) de la fecha dada, en 'YYYY-MM-DD'. */
+function weekStartISO(iso: string): string {
+  const d = parseLocalISODate(iso);
+  const offset = (d.getDay() + 6) % 7; // 0=lunes … 6=domingo
+  d.setDate(d.getDate() - offset);
+  return toLocalISODate(d);
+}
+
+/**
+ * P-018: agrupa la serie DIARIA en buckets semanales (lunes a domingo), sumando
+ * ingresos y costos. El label es el lunes de la semana en DD/MM. `emphasized`
+ * marca la semana que contiene "hoy". Mantiene el orden cronológico de entrada.
+ * CEO: la vista mensual muestra semanas, no días.
+ */
+export function bucketByWeek(points: DailyFlowPoint[]): WeeklyFlowBucket[] {
+  const order: string[] = [];
+  const map = new Map<string, WeeklyFlowBucket>();
+  for (const p of points) {
+    const key = weekStartISO(p.date);
+    let b = map.get(key);
+    if (!b) {
+      b = { key, label: ddMM(key), up: 0, down: 0, emphasized: false };
+      map.set(key, b);
+      order.push(key);
+    }
+    b.up += p.up;
+    b.down += p.down;
+    if (p.isToday) b.emphasized = true;
+  }
+  return order.map(k => map.get(k)!);
+}

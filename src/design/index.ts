@@ -20,6 +20,7 @@
 export { color, space, radius, text, shadow, breakpoint, tokens } from './tokens';
 export type { SpaceKey, RadiusKey, SizeKey, WeightKey } from './tokens';
 export type { PeriodBarPoint } from './components/PeriodBars';
+export type { PeriodLinePoint } from './components/PeriodLines';
 
 export { default as Heading } from './components/Heading';
 export { default as Text } from './components/Text';
@@ -31,6 +32,7 @@ export { default as Input } from './components/Input';
 export { default as SegmentedControl } from './components/SegmentedControl';
 export { default as Chip } from './components/Chip';
 export { default as PeriodBars } from './components/PeriodBars';
+export { default as PeriodLines } from './components/PeriodLines';
 export { default as TabBar } from './components/TabBar';
 export type { TabItem } from './components/TabBar';
 export { default as SideNav } from './components/SideNav';

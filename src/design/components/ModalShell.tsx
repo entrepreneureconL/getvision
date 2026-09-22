@@ -39,7 +39,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { color } from '../tokens';
-import { confirmDestructive } from '../../utils/confirm';
+import { requestDiscardOrClose } from '../../utils/confirm';
 
 type Placement = 'sheet' | 'center';
 
@@ -75,18 +75,10 @@ export default function ModalShell({
   avoidKeyboard = false,
 }: Props) {
   // Cierre por backdrop/Esc/back: si está dirty, confirmar antes de descartar.
+  // Misma puerta que usa el × del header de cada form (requestDiscardOrClose),
+  // así todas las rutas de cierre se comportan idéntico (P-022).
   const requestClose = () => {
-    if (dirty) {
-      confirmDestructive({
-        title: dirtyTitle,
-        message: dirtyMessage,
-        confirmLabel: 'Descartar',
-        cancelLabel: 'Seguir editando',
-        onConfirm: onClose,
-      });
-    } else {
-      onClose();
-    }
+    requestDiscardOrClose({ dirty, onClose, title: dirtyTitle, message: dirtyMessage });
   };
 
   // Ref con el último requestClose para no re-bindear el listener cada render.

@@ -20,7 +20,7 @@ import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator,
 } from 'react-native';
-import { confirmDestructive } from '../utils/confirm';
+import { confirmDestructive, requestDiscardOrClose } from '../utils/confirm';
 import { todayLocalISO } from '../utils/periods';
 import { ordersRepo } from '../repos/orders';
 import type { Order } from '../schemas/order';
@@ -121,12 +121,12 @@ export default function OrderForm({
 
         <View style={styles.panelHeader}>
           <Text style={styles.panelTitle}>{isEdit ? 'Editar pedido' : 'Nuevo pedido'}</Text>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+          <TouchableOpacity onPress={() => requestDiscardOrClose({ dirty, onClose })} style={styles.closeBtn}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={true}>
 
           <Text style={styles.label}>¿Quién te lo encargó? *</Text>
           <TextInput

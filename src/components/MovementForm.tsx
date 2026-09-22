@@ -31,6 +31,7 @@ import { accountsRepo } from '../repos/accounts';
 import { eventsRepo } from '../repos/events';
 import { resolveCategory } from '../utils/transactionCategories';
 import { todayLocalISO } from '../utils/periods';
+import { requestDiscardOrClose } from '../utils/confirm';
 import type { Account } from '../schemas/account';
 import type { Transaction } from '../schemas/transaction';
 import { ModalShell } from '../design';
@@ -81,6 +82,10 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
     if (pendingChanged) onSuccess();  // refresca dashboard si saldé algo
     else onClose();
   };
+
+  // P-022: el × pasa por la misma puerta dirty que el backdrop (confirma si hay
+  // cambios sin guardar; si no, cierra vía handleClose).
+  const requestClose = () => requestDiscardOrClose({ dirty, onClose: handleClose });
 
   useEffect(() => {
     let active = true;
@@ -229,7 +234,7 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
 
         <View style={styles.panelHeader}>
           <Text style={styles.panelTitle}>↔️ Movimientos</Text>
-          <TouchableOpacity onPress={handleClose}>
+          <TouchableOpacity onPress={requestClose}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
         </View>
@@ -249,7 +254,7 @@ export default function MovementForm({ businessId, onSuccess, onClose }: Props) 
           ))}
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={true}>
 
           {/* TAB: Pendientes */}
           {activeTab === 'Pendientes' && (

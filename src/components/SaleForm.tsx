@@ -3,7 +3,7 @@ import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, Dimensions
 } from 'react-native';
-import { confirmDestructive } from '../utils/confirm';
+import { confirmDestructive, requestDiscardOrClose } from '../utils/confirm';
 import { supabase } from '../lib/supabase';
 import {
   getCategoriesForType,
@@ -204,6 +204,10 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction, 
     });
   };
 
+  // P-022: el × usa la MISMA puerta dirty que el backdrop de ModalShell. Antes
+  // cerraba directo y salteaba el "¿Descartar?" → ahora ambas rutas confirman.
+  const requestClose = () => requestDiscardOrClose({ dirty, onClose });
+
   return (
     <>
     <ModalShell visible onClose={onClose} dirty={dirty}>
@@ -211,12 +215,12 @@ export default function SaleForm({ businessId, onSuccess, onClose, transaction, 
 
         <View style={styles.panelHeader}>
           <Text style={styles.panelTitle}>{isEdit ? 'Editar venta' : 'Nueva venta'}</Text>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+          <TouchableOpacity onPress={requestClose} style={styles.closeBtn}>
             <Text style={styles.closeText}>✕</Text>
           </TouchableOpacity>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={true}>
 
           <Text style={styles.label}>Monto de la venta *</Text>
           <View style={styles.amountRow}>
